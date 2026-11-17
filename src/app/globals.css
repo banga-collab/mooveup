@@ -1,0 +1,70 @@
+@import "tailwindcss";
+
+/* ===== Charte Moov'Up Sports ===== */
+@theme {
+  --color-brand-50: #eef6f9;
+  --color-brand-100: #d5e9f0;
+  --color-brand-200: #a9d1e0;
+  --color-brand-300: #74b2ca;
+  --color-brand-400: #3f8fae;
+  --color-brand-500: #1a6d8e;
+  --color-brand-600: #155a76;
+  --color-brand-700: #12495f;
+  --color-brand-800: #0f3a4b;
+  --color-brand-900: #0b2a37;
+
+  --color-accent-50: #fdf3eb;
+  --color-accent-100: #fbe3d0;
+  --color-accent-200: #f6c39d;
+  --color-accent-300: #f1a26a;
+  --color-accent-400: #ec8a45;
+  --color-accent-500: #e8782a;
+  --color-accent-600: #c9611a;
+  --color-accent-700: #a14c14;
+
+  --color-ink: #16212b;
+  --color-muted: #66727e;
+  --color-line: #e5e9ee;
+  --color-canvas: #f4f6f8;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-montserrat), var(--font-inter), sans-serif;
+
+  --shadow-card: 0 1px 2px rgb(16 24 40 / 0.04), 0 1px 3px rgb(16 24 40 / 0.04);
+  --shadow-pop: 0 10px 30px -10px rgb(16 24 40 / 0.18);
+
+  --animate-fade-up: fade-up 0.35s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+}
+
+html { -webkit-tap-highlight-color: transparent; }
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-feature-settings: "cv11", "ss01";
+}
+
+::selection { background: var(--color-accent-200); }
+
+input[type="range"] { accent-color: var(--color-accent-500); }
+
+/* Scrollbars discrètes */
+* { scrollbar-width: thin; scrollbar-color: #cfd6dd transparent; }
+
+@media print {
+  body { background: #fff; }
+  .no-print { display: none !important; }
+  .print-break { break-inside: avoid; }
+  @page { margin: 14mm; }
+}
+
+@keyframes wave {
+  0%, 100% { transform: rotate(0); }
+  20% { transform: rotate(16deg); }
+  40% { transform: rotate(-8deg); }
+  60% { transform: rotate(14deg); }
+  80% { transform: rotate(-4deg); }
+}
