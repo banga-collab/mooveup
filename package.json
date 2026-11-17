@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "dev:demo": "node -e \"process.env.NEXT_PUBLIC_DEMO='1';require('child_process').spawn('npx',['next','dev'],{stdio:'inherit',shell:true,env:process.env})\""
+    "dev:demo": "node -e \"process.env.NEXT_PUBLIC_DEMO='1';process.env.NODE_OPTIONS='--max-old-space-size=4096';require('child_process').spawn('npx',['next','dev'],{stdio:'inherit',shell:true,env:process.env})\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "1.9.0",

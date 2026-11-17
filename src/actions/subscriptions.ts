@@ -9,6 +9,9 @@ import { entity, type EntityId } from "@/lib/entities";
 import { PAY_LABEL, addDaysKey, dayKey, fmtDate, mad, parseNum, str } from "@/lib/utils";
 import type { CatalogItem, Contact, PayMethod, SaleStatus, Subscription } from "@/lib/types";
 import type { FormState } from "@/components/action-form";
+import { logAudit } from "@/lib/audit";
+import { flash } from "@/lib/flash";
+import { recordUndo, type UndoOp } from "@/lib/undo";
 
 const METHODS = Object.keys(PAY_LABEL) as PayMethod[];
 
@@ -141,8 +144,21 @@ export async function createSubscription(_state: FormState, formData: FormData):
   if (!contact.entity_ids.includes(entityId)) patch.entity_ids = [...contact.entity_ids, entityId];
   await supabase.from("contacts").update(patch).eq("id", contactId);
 
+  if (discount > 0) {
+    await logAudit({
+      action: "vente.remise",
+      entity_id: entityId,
+      target_type: "contact",
+      target_id: contactId,
+      summary: `Remise de ${mad(discount)} sur ${isPack ? "le pack" : "l'abonnement"} ${item.name} de ${contact.full_name}${number ? ` (vente ${number})` : ""}`,
+      actor: profile,
+      meta: { amount: discount, pct: price ? Math.round((discount / price) * 100) : 0 },
+    });
+  }
+
   refresh(contactId);
   revalidatePath("/contacts");
+  await flash(`${isPack ? "Pack" : "Abonnement"} ${item.name} enregistré${number ? ` · vente ${number}` : ""}`);
   redirect(`/contacts/${contactId}?tab=abonnements`);
 }
 
@@ -194,6 +210,7 @@ export async function renewSubscription(id: string, _state: FormState, formData:
 
   await supabase.from("contacts").update({ status: "client" }).eq("id", sub.contact_id);
   refresh(sub.contact_id);
+  await flash(`${sub.name} renouvelé jusqu'au ${fmtDate(end)}`);
   redirect(back);
 }
 
@@ -208,14 +225,32 @@ export async function setSubscriptionStatus(id: string, status: "actif" | "suspe
     .update(status === "resilie" ? { status, auto_renew: false } : { status })
     .eq("id", id);
   const verb = status === "actif" ? "réactivé" : status === "suspendu" ? "suspendu" : "résilié";
-  await supabase.from("activities").insert({
+  const { data: act } = await supabase.from("activities").insert({
     contact_id: sub.contact_id,
     entity_id: sub.entity_id,
     kind: "statut",
     body: `Abonnement ${sub.name} ${verb}`,
     author_id: profile.id,
-  });
+  }).select("id").maybeSingle();
+  if (status === "resilie") {
+    await logAudit({
+      action: "abonnement.resiliation",
+      entity_id: sub.entity_id,
+      target_type: "subscription",
+      target_id: sub.id,
+      summary: `Abonnement ${sub.name} résilié (fin prévue le ${fmtDate(sub.end_date)})`,
+      actor: profile,
+      meta: { contact_id: sub.contact_id },
+    });
+  }
   refresh(sub.contact_id);
+  let undo: string | null = null;
+  if (status !== "actif") {
+    const ops: UndoOp[] = [{ op: "update", table: "subscriptions", id, values: { status: sub.status, auto_renew: sub.auto_renew } }];
+    if (act) ops.push({ op: "remove", table: "activities", ids: [(act as { id: string }).id] });
+    undo = await recordUndo(`abonnement.${status}`, { ops, message: `Abonnement ${sub.name} rétabli` });
+  }
+  await flash(`Abonnement ${verb}`, "success", { undo });
 }
 
 /** Décompte une séance d'un pack */
@@ -236,4 +271,5 @@ export async function consumeSession(id: string) {
     author_id: profile.id,
   });
   refresh(sub.contact_id);
+  await flash(left ? `Séance décomptée · reste ${left}` : "Dernière séance décomptée · pack terminé");
 }

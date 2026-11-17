@@ -8,6 +8,9 @@ import { ENTITY_IDS, type EntityId } from "@/lib/entities";
 import { str } from "@/lib/utils";
 import type { ActivityKind, Contact, ContactStatus, LeadSource } from "@/lib/types";
 import type { FormState } from "@/components/action-form";
+import { logAudit } from "@/lib/audit";
+import { flash } from "@/lib/flash";
+import { contactSnapshotOps, recordUndo } from "@/lib/undo";
 import { formatPhone, parseTags, phoneDigits, SOURCES } from "@/components/contacts/helpers";
 
 export type ContactFormState = { error?: string; duplicate?: { id: string; name: string } } | undefined;
@@ -82,6 +85,7 @@ export async function createContact(_: ContactFormState, fd: FormData): Promise<
     .single();
   if (error || !data) return { error: "Impossible d'enregistrer le contact. Réessayez." };
   revalidatePath("/", "layout");
+  await flash(r.values.status === "prospect" ? "Contact ajouté" : "Client ajouté");
   redirect(`/contacts/${(data as Contact).id}`);
 }
 
@@ -102,6 +106,7 @@ export async function updateContact(id: string, _: ContactFormState, fd: FormDat
   const { error } = await supabase.from("contacts").update({ ...r.values, entity_ids }).eq("id", id);
   if (error) return { error: "Impossible d'enregistrer les modifications." };
   revalidatePath("/", "layout");
+  await flash("Fiche client mise à jour");
   redirect(`/contacts/${id}`);
 }
 
@@ -116,8 +121,21 @@ export async function deleteContact(id: string) {
   const contact = data as Contact | null;
   if (contact && contact.entity_ids.some((e) => allowedIds.includes(e))) {
     const others = contact.entity_ids.filter((e) => !allowedIds.includes(e));
+    // Annulation 5 s : fiche et lignes liées mémorisées avant suppression
+    const undoOps = others.length ? [{ op: "update" as const, table: "contacts", id, values: { entity_ids: contact.entity_ids } }] : await contactSnapshotOps(supabase, contact);
     if (others.length) await supabase.from("contacts").update({ entity_ids: others }).eq("id", id);
     else await supabase.from("contacts").delete().eq("id", id);
+    const mine = contact.entity_ids.filter((e) => allowedIds.includes(e));
+    await logAudit({
+      action: others.length ? "contact.retrait" : "contact.suppression",
+      entity_id: scope.current?.id ?? mine[0] ?? null,
+      target_type: "contact",
+      target_id: others.length ? contact.id : null,
+      summary: others.length ? `${contact.full_name} retiré(e) de ${mine.length} établissement${mine.length > 1 ? "s" : ""} (fiche conservée ailleurs)` : `Fiche client ${contact.full_name}${contact.phone ? ` (${contact.phone})` : ""} supprimée`,
+      actor: profile,
+    });
+    const undo = await recordUndo(others.length ? "contact.retrait" : "contact.suppression", { ops: undoOps, message: `Fiche de ${contact.full_name} restaurée`, href: `/contacts/${id}` });
+    await flash(others.length ? "Client retiré de vos établissements" : "Client supprimé", "success", { undo });
   }
   revalidatePath("/", "layout");
   redirect("/contacts");
@@ -143,5 +161,6 @@ export async function addActivity(contactId: string, _: FormState, fd: FormData)
   const { error } = await supabase.from("activities").insert({ contact_id: contactId, entity_id, kind, body: body.slice(0, 2000), author_id: profile.id });
   if (error) return { error: "Impossible d'enregistrer cet échange." };
   revalidatePath(`/contacts/${contactId}`);
+  await flash("Ajouté à l'historique");
   return undefined;
 }

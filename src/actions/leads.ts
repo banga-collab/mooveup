@@ -8,6 +8,8 @@ import { ENTITY_IDS, entity, type EntityId } from "@/lib/entities";
 import { STAGE_LABEL, STAGES, parseNum, str } from "@/lib/utils";
 import type { Contact, Lead, LeadSource, LeadStage } from "@/lib/types";
 import type { FormState } from "@/components/action-form";
+import { flash } from "@/lib/flash";
+import { recordUndo, type UndoOp } from "@/lib/undo";
 import { formatPhone, phoneDigits, SOURCES } from "@/components/contacts/helpers";
 
 const isSource = (v: string | null): v is LeadSource => SOURCES.some(([k]) => k === v);
@@ -86,6 +88,7 @@ export async function createLead(_: FormState, fd: FormData): Promise<FormState>
     author_id: profile.id,
   });
   revalidatePath("/", "layout");
+  await flash(`Prospect ${contact.full_name} ajouté`);
   redirect(fd.get("back") === "contact" ? `/contacts/${contact.id}?tab=prospects` : "/prospects");
 }
 
@@ -105,6 +108,7 @@ async function applyStage(id: string, stage: LeadStage, lostReason: string | nul
   if (!loaded || !STAGES.some((s) => s.id === stage)) return;
   const { lead, supabase } = loaded;
   if (lead.stage === stage && stage !== "perdu") return;
+  const undoOps: UndoOp[] = [{ op: "update", table: "leads", id, values: { stage: lead.stage, updated_at: lead.updated_at, lost_reason: lead.lost_reason } }];
   await supabase
     .from("leads")
     .update({ stage, updated_at: new Date().toISOString(), lost_reason: stage === "perdu" ? lostReason : null })
@@ -114,20 +118,28 @@ async function applyStage(id: string, stage: LeadStage, lostReason: string | nul
     const { data } = await supabase.from("contacts").select("*").eq("id", lead.contact_id).maybeSingle();
     const contact = data as Contact | null;
     if (contact) {
+      undoOps.push({ op: "update", table: "contacts", id: contact.id, values: { status: contact.status, entity_ids: contact.entity_ids } });
       const entity_ids = ENTITY_IDS.filter((e) => contact.entity_ids.includes(e) || e === lead.entity_id);
       await supabase.from("contacts").update({ status: "client", entity_ids }).eq("id", contact.id);
     }
   }
 
   const label = `Prospect « ${lead.interest} » : ${STAGE_LABEL[lead.stage]} → ${STAGE_LABEL[stage]}`;
-  await supabase.from("activities").insert({
-    contact_id: lead.contact_id,
-    entity_id: lead.entity_id,
-    kind: "statut",
-    body: stage === "perdu" && lostReason ? `${label} (${lostReason})` : label,
-    author_id: profile.id,
-  });
+  const { data: act } = await supabase
+    .from("activities")
+    .insert({
+      contact_id: lead.contact_id,
+      entity_id: lead.entity_id,
+      kind: "statut",
+      body: stage === "perdu" && lostReason ? `${label} (${lostReason})` : label,
+      author_id: profile.id,
+    })
+    .select("id")
+    .maybeSingle();
+  if (act) undoOps.push({ op: "remove", table: "activities", ids: [(act as { id: string }).id] });
   revalidatePath("/", "layout");
+  const undo = await recordUndo(`prospect.${stage}`, { ops: undoOps, message: `Prospect remis à « ${STAGE_LABEL[lead.stage]} »` });
+  await flash(stage === "gagne" ? "Prospect gagné · devenu client" : `Prospect passé à « ${STAGE_LABEL[stage]} »`, "success", { undo });
 }
 
 /** Passe un prospect à une étape (bouton lié par .bind(null, id, étape)) */

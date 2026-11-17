@@ -7,6 +7,9 @@ import { createClient } from "@/lib/supabase/server";
 import { addDaysKey, dayKey, mad, parseNum, PAY_LABEL } from "@/lib/utils";
 import type { Appointment, CatalogItem, Contact, PayMethod, Sale, SaleItem, SaleStatus } from "@/lib/types";
 import type { FormState } from "@/components/action-form";
+import { onSaleCreated, onSaleRefunded } from "@/lib/hooks";
+import { logAudit } from "@/lib/audit";
+import { flash } from "@/lib/flash";
 
 const METHODS: PayMethod[] = ["especes", "carte", "virement", "cheque", "en_ligne"];
 
@@ -172,9 +175,12 @@ export async function createSale(input: CheckoutInput): Promise<{ error?: string
 
   if (rdv && rdv.status !== "termine") await supabase.from("appointments").update({ status: "termine" }).eq("id", rdv.id);
 
+  await onSaleCreated({ sale, lines: lines.map((l) => ({ item_id: l.item_id, label: l.label, qty: l.qty, unit_price_mad: l.unit_price })), contact, profile, discount });
+
   revalidatePath("/ventes");
   revalidatePath("/caisse");
   revalidatePath("/");
+  await flash(`Vente ${sale.number} enregistrée`);
   redirect(`/ventes/${sale.id}?ok=1`);
 }
 
@@ -212,8 +218,19 @@ export async function addPayment(id: string, _state: FormState, formData: FormDa
       author_id: profile.id,
     });
   }
+  const received = round2(Math.min(amount, rest));
+  await logAudit({
+    action: "vente.paiement",
+    entity_id: sale.entity_id,
+    target_type: "sale",
+    target_id: sale.id,
+    summary: `Paiement de ${mad(received)} (${PAY_LABEL[METHODS.includes(method) ? method : sale.method]}) sur la vente ${sale.number}${status === "payee" ? ", soldée" : ""}`,
+    actor: profile,
+    meta: { amount: received, method: METHODS.includes(method) ? method : sale.method, contact_id: sale.contact_id },
+  });
   revalidatePath(`/ventes/${sale.id}`);
   revalidatePath("/ventes");
+  await flash(`Paiement de ${mad(received)} enregistré`);
   redirect(`/ventes/${sale.id}`);
 }
 
@@ -235,6 +252,7 @@ export async function refundSale(id: string) {
     }
   }
   await supabase.from("sales").update({ status: "remboursee" }).eq("id", sale.id);
+  await onSaleRefunded({ sale, profile });
   if (sale.contact_id) {
     await supabase.from("activities").insert({
       contact_id: sale.contact_id,
@@ -247,5 +265,6 @@ export async function refundSale(id: string) {
   revalidatePath(`/ventes/${sale.id}`);
   revalidatePath("/ventes");
   revalidatePath("/");
+  await flash(`Vente ${sale.number} remboursée`);
   redirect(`/ventes/${sale.id}`);
 }

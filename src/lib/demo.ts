@@ -21,10 +21,10 @@ export const DEMO_ACCOUNTS = [
 type Row = Record<string, any>;
 export type DB = Record<string, Row[]>;
 
-const g = globalThis as unknown as { __moovupCrmV2?: DB };
+const g = globalThis as unknown as { __moovupCrmV4?: DB };
 export function demoDb(): DB {
-  if (!g.__moovupCrmV2) g.__moovupCrmV2 = seed();
-  return g.__moovupCrmV2;
+  if (!g.__moovupCrmV4) g.__moovupCrmV4 = seed();
+  return g.__moovupCrmV4;
 }
 
 /* ---------- Faux constructeur de requêtes ---------- */

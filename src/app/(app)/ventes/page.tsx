@@ -1,23 +1,29 @@
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, CircleDollarSign, Download, HandCoins, Receipt, ReceiptText, Search, ShoppingCart, Wallet } from "lucide-react";
+import { CalendarRange, ChevronRight, CircleDollarSign, FileSpreadsheet, HandCoins, Receipt, ReceiptText, ShoppingCart, Wallet } from "lucide-react";
 import { getScope } from "@/lib/auth";
-import { addDaysKey, cn, dayKey, fmtDate, fmtTime, mad, madShort, PAY_LABEL, pct } from "@/lib/utils";
+import { entity } from "@/lib/entities";
+import { cn, fmtDate, fmtTime, mad, madShort, PAY_LABEL, pct, SALE_STATUS_LABEL } from "@/lib/utils";
 import { SolidTile } from "@/components/stat-tile";
-import { Card, CardHeader, Empty, LinkButton, buttonClass } from "@/components/ui";
-import { EntityBadge, EntityMark } from "@/components/entity-icon";
+import { Card, Empty, Input, LinkButton, PageHeader, buttonClass } from "@/components/ui";
+import { EntityBadge } from "@/components/entity-icon";
+import { ListToolbar } from "@/components/list-toolbar";
+import { DataTable } from "@/components/data-table/data-table";
+import type { DataColumn, DataRow } from "@/components/data-table/types";
+import { SaveViewButton } from "@/components/data-table/save-view";
+import { ContactLink } from "@/components/quick-view/contact-link";
+import { formatPhone } from "@/components/contacts/helpers";
 import { MethodChip, METHOD_META, METHOD_ORDER, SaleStatusBadge } from "@/components/sales/meta";
-import { filtersQuery, loadSales, readFilters } from "@/components/sales/query";
+import { filtersQuery, linesLabel, loadSales, readFilters } from "@/components/sales/query";
 
 export const metadata = { title: "Ventes & factures" };
 
-const PAGE = 50;
+const MAX_ROWS = 2000;
 
 export default async function VentesPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const sp = await searchParams;
   const scope = await getScope();
   const f = readFilters(sp);
-  const page = Math.max(1, Number(Array.isArray(sp.page) ? sp.page[0] : sp.page) || 1);
-  const { sales, contacts } = await loadSales(scope, f);
+  const { sales, contacts, sellers, lines } = await loadSales(scope, f);
 
   const live = sales.filter((s) => s.status !== "remboursee");
   const ca = live.reduce((a, s) => a + Number(s.total_mad), 0);
@@ -29,123 +35,172 @@ export default async function VentesPage({ searchParams }: { searchParams: Promi
     return { m, n: rows.length, paid: rows.reduce((a, s) => a + Number(s.paid_mad), 0) };
   });
 
-  // Raccourcis de période
-  const today = dayKey();
-  const monthStart = `${today.slice(0, 8)}01`;
-  const prevEnd = addDaysKey(monthStart, -1);
-  const prevStart = `${prevEnd.slice(0, 8)}01`;
-  const presets = [
-    { label: "Aujourd'hui", du: today, au: today },
-    { label: "7 jours", du: addDaysKey(today, -6), au: today },
-    { label: "Ce mois", du: monthStart, au: today },
-    { label: "Mois dernier", du: prevStart, au: prevEnd },
-  ];
   const periodLabel = f.du === f.au ? fmtDate(f.du + "T12:00:00Z", { day: "numeric", month: "long", year: "numeric" }) : `du ${fmtDate(f.du + "T12:00:00Z")} au ${fmtDate(f.au + "T12:00:00Z")}`;
-
-  const pages = Math.max(1, Math.ceil(sales.length / PAGE));
-  const cur = Math.min(page, pages);
-  const rows = sales.slice((cur - 1) * PAGE, cur * PAGE);
   const multi = scope.ids.length > 1;
+  const filtered = !!(f.q || f.statut || f.mode || f.etab);
+
+  /* Tableau */
+  const columns: DataColumn[] = [
+    { key: "numero", label: "N°", card: "subtitle", hideable: false },
+    { key: "date", label: "Date", className: "whitespace-nowrap tabular-nums text-slate-600", card: "subtitle" },
+    { key: "client", label: "Client", card: "title", className: "max-w-[220px] truncate" },
+    { key: "telephone", label: "Téléphone", hidden: true, className: "whitespace-nowrap tabular-nums text-slate-600" },
+    ...(multi ? [{ key: "etab", label: "Établissement" }] : []),
+    { key: "articles", label: "Articles", hidden: true, className: "max-w-[260px] truncate text-[13px] text-slate-600" },
+    { key: "total", label: "Total", numeric: true, card: "right", className: "font-semibold text-ink" },
+    { key: "paye", label: "Payé", numeric: true },
+    { key: "reste", label: "Reste", numeric: true, hidden: true },
+    { key: "statut", label: "Statut" },
+    { key: "mode", label: "Mode" },
+    { key: "vendeur", label: "Vendeur", hidden: true, className: "whitespace-nowrap text-[13px] text-slate-600" },
+  ];
+
+  const rows: DataRow[] = sales.slice(0, MAX_ROWS).map((s) => {
+    const c = s.contact_id ? contacts.get(s.contact_id) : undefined;
+    const total = Number(s.total_mad);
+    const paid = Number(s.paid_mad);
+    const due = s.status === "remboursee" ? 0 : Math.max(0, total - paid);
+    const seller = s.sold_by ? sellers.get(s.sold_by)?.full_name : null;
+    return {
+      id: s.id,
+      href: `/ventes/${s.id}`,
+      className: s.status === "remboursee" ? "text-slate-400 opacity-70" : undefined,
+      cells: {
+        numero: (
+          <Link href={`/ventes/${s.id}`} className="text-[13px] font-medium tabular-nums text-brand-600 hover:underline">
+            {s.number}
+          </Link>
+        ),
+        date: (
+          <>
+            {fmtDate(s.sold_at, { day: "2-digit", month: "short" })} <span className="text-muted">· {fmtTime(s.sold_at)}</span>
+          </>
+        ),
+        client: c ? <ContactLink id={c.id} name={c.full_name} /> : <span className="text-muted">Client de passage</span>,
+        telephone: formatPhone(c?.phone),
+        etab: <EntityBadge id={s.entity_id} />,
+        articles: linesLabel(lines.get(s.id)) || null,
+        total: mad(total),
+        paye: <span className={cn(due > 0 ? "font-medium text-red-600" : "text-slate-600")}>{mad(paid)}</span>,
+        reste: due > 0 ? <span className="font-medium text-red-600">{mad(due)}</span> : mad(0),
+        statut: <SaleStatusBadge status={s.status} />,
+        mode: <MethodChip method={s.method} />,
+        vendeur: seller ?? null,
+      },
+      values: {
+        numero: s.number,
+        date: s.sold_at,
+        client: c?.full_name ?? "Client de passage",
+        telephone: c?.phone,
+        etab: entity(s.entity_id)?.short ?? s.entity_id,
+        articles: linesLabel(lines.get(s.id)),
+        total,
+        paye: paid,
+        reste: due,
+        statut: SALE_STATUS_LABEL[s.status],
+        mode: PAY_LABEL[s.method],
+        vendeur: seller,
+      },
+    };
+  });
+
+  const periodNames: Record<string, string> = { today: "Aujourd'hui", "7j": "7 jours", "30j": "30 jours", mois: "Ce mois", prev: "Mois dernier", annee: "Cette année", perso: periodLabel };
+  const viewName = ["Ventes", periodNames[f.periode], f.statut && (f.statut === "impayee" ? "À encaisser" : SALE_STATUS_LABEL[f.statut]), f.mode && METHOD_META[f.mode].short, f.etab && entity(f.etab)?.short, f.q && `« ${f.q} »`]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-4 animate-fade-up">
-        <div className="min-w-0">
-          <h1 className="font-display text-2xl font-extrabold tracking-tight sm:text-[28px]">Ventes & factures</h1>
-          <p className="mt-1 text-sm text-muted">
-            {scope.current ? <b style={{ color: scope.current.color }}>{scope.current.name}</b> : `${scope.allowed.length} établissements`} · {periodLabel}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <a href={`/api/export/ventes?${filtersQuery(f)}`} className={buttonClass("secondary", "h-11 rounded-2xl")}>
-            <Download className="size-4" /> Exporter CSV
-          </a>
-          <LinkButton href="/caisse" className="h-11 rounded-2xl">
-            <ShoppingCart className="size-4" /> Nouvelle vente
+    <div className="space-y-5">
+      <PageHeader
+        title="Ventes & factures"
+        subtitle={
+          <span className="inline-flex flex-wrap items-center gap-x-2">
+            {scope.current ? <EntityBadge id={scope.current.id} short={false} /> : <span>{scope.allowed.length} établissements</span>}
+            <span className="text-slate-300">·</span>
+            <span>{periodLabel}</span>
+          </span>
+        }
+        actions={
+          <LinkButton href="/caisse">
+            <ShoppingCart /> Encaisser
           </LinkButton>
-        </div>
-      </div>
+        }
+      />
 
-      {/* Tuiles */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0">
-        <SolidTile tone="brand" label="Chiffre d'affaires" value={madShort(ca)} sub={`${mad(ca)}${refunded ? ` · ${refunded} remboursée${refunded > 1 ? "s" : ""}` : ""}`} icon={<CircleDollarSign />} watermark={<CircleDollarSign />} />
-        <SolidTile tone="green" label="Encaissé" value={madShort(cashed)} sub={`${pct(cashed, ca)} % du chiffre d'affaires`} icon={<Wallet />} watermark={<Wallet />} />
+      {/* Indicateurs */}
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4 [&>*]:min-w-0">
+        <SolidTile label="Chiffre d'affaires" value={madShort(ca)} sub={refunded ? `${refunded} remboursée${refunded > 1 ? "s" : ""}` : mad(ca)} icon={<CircleDollarSign />} />
+        <SolidTile label="Encaissé" value={madShort(cashed)} sub={`${pct(cashed, ca)} % du CA`} icon={<Wallet />} />
         <SolidTile
-          tone="accent"
           label="Reste à encaisser"
           value={madShort(rest)}
           sub={`${live.filter((s) => s.status === "partielle" || s.status === "impayee").length} vente(s) non soldée(s)`}
           icon={<HandCoins />}
-          watermark={<HandCoins />}
           href={`/ventes?${filtersQuery({ ...f, statut: "impayee" })}`}
         />
-        <SolidTile tone="violet" label="Ventes" value={sales.length} sub={live.length ? `Panier moyen ${mad(ca / live.length)}` : "Aucune vente"} icon={<ReceiptText />} watermark={<ReceiptText />} />
+        <SolidTile label="Ventes" value={sales.length} sub={live.length ? `Panier moyen ${mad(ca / live.length)}` : "Aucune vente"} icon={<ReceiptText />} />
       </div>
 
-      {/* Filtres */}
-      <Card className="p-4 sm:p-5">
-        <div className="-mx-1 mb-4 flex flex-wrap gap-1.5">
-          {presets.map((p) => {
-            const on = p.du === f.du && p.au === f.au;
-            return (
-              <Link
-                key={p.label}
-                href={`/ventes?${filtersQuery({ ...f, du: p.du, au: p.au })}`}
-                className={cn("h-9 rounded-full px-3.5 text-[13px] font-semibold leading-9 transition", on ? "bg-brand-500 text-white shadow-sm shadow-brand-500/30" : "border border-line bg-white text-slate-600 hover:border-slate-300")}
-              >
-                {p.label}
-              </Link>
-            );
-          })}
-        </div>
-        <form className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[150px_150px_1fr_1fr_1.4fr_auto] [&>*]:min-w-0">
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-slate-600">Du</span>
-            <input type="date" name="du" defaultValue={f.du} className="h-11 w-full rounded-xl border border-line bg-white px-3 text-sm focus:border-brand-400 focus:outline-none" />
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-slate-600">Au</span>
-            <input type="date" name="au" defaultValue={f.au} className="h-11 w-full rounded-xl border border-line bg-white px-3 text-sm focus:border-brand-400 focus:outline-none" />
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-slate-600">Statut</span>
-            <select name="statut" defaultValue={f.statut} className="h-11 w-full rounded-xl border border-line bg-white px-3 text-sm focus:border-brand-400 focus:outline-none">
-              <option value="">Tous</option>
-              <option value="payee">Payée</option>
-              <option value="partielle">Partielle</option>
-              <option value="impayee">À encaisser (impayée ou partielle)</option>
-              <option value="remboursee">Remboursée</option>
-            </select>
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-slate-600">Mode</span>
-            <select name="mode" defaultValue={f.mode} className="h-11 w-full rounded-xl border border-line bg-white px-3 text-sm focus:border-brand-400 focus:outline-none">
-              <option value="">Tous</option>
-              {METHOD_ORDER.map((m) => (
-                <option key={m} value={m}>
-                  {PAY_LABEL[m]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold text-slate-600">Recherche</span>
-            <span className="relative block">
-              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-              <input name="q" defaultValue={f.q} placeholder="N° de vente ou client" className="h-11 w-full rounded-xl border border-line bg-white pl-9 pr-3 text-sm placeholder:text-slate-400 focus:border-brand-400 focus:outline-none" />
-            </span>
-          </label>
-          <div className="flex items-end gap-2">
-            <button className={buttonClass("brand", "h-11 flex-1 lg:flex-none")}>Filtrer</button>
-            <Link href="/ventes" className={buttonClass("ghost", "h-11")}>
-              Effacer
-            </Link>
-          </div>
-        </form>
-      </Card>
+      {/* Recherche et filtres */}
+      <div>
+        <ListToolbar
+          className="mb-2"
+          placeholder="N°, client, téléphone, article, montant…"
+          filters={[
+            {
+              param: "periode",
+              label: "Ce mois",
+              options: [
+                { value: "today", label: "Aujourd'hui" },
+                { value: "7j", label: "7 jours" },
+                { value: "30j", label: "30 jours" },
+                { value: "prev", label: "Mois dernier" },
+                { value: "annee", label: "Cette année" },
+              ],
+            },
+            {
+              param: "statut",
+              label: "Tous statuts",
+              options: [
+                { value: "payee", label: "Payées" },
+                { value: "impayee", label: "À encaisser" },
+                { value: "partielle", label: "Partielles" },
+                { value: "remboursee", label: "Remboursées" },
+              ],
+            },
+            { param: "mode", label: "Tous modes", options: METHOD_ORDER.map((m) => ({ value: m, label: METHOD_META[m].short })) },
+            ...(multi ? [{ param: "etab", label: "Tous établ.", options: scope.allowed.filter((e) => scope.ids.includes(e.id)).map((e) => ({ value: e.id, label: e.short })) }] : []),
+          ]}
+          right={<SaveViewButton defaultLabel={viewName} icon="/ventes" />}
+        />
 
-      {/* Totaux par mode de paiement */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 [&>*]:min-w-0">
+        {/* Période personnalisée */}
+        <details className="group" open={f.periode === "perso"}>
+          <summary className="inline-flex h-8 cursor-pointer list-none items-center gap-1.5 rounded-md px-1 text-[13px] font-medium text-slate-500 hover:text-ink [&::-webkit-details-marker]:hidden">
+            <CalendarRange className="size-4 text-slate-400" /> Période personnalisée
+            {f.periode === "perso" && <span className="font-normal text-muted">· {periodLabel}</span>}
+            <ChevronRight className="size-3.5 text-slate-400 transition group-open:rotate-90" />
+          </summary>
+          <form action="/ventes" className="mt-2 flex flex-wrap items-end gap-2">
+            <label className="block w-[150px]">
+              <span className="mb-1 block text-xs text-muted">Du</span>
+              <Input type="date" name="du" defaultValue={f.du} className="h-9" />
+            </label>
+            <label className="block w-[150px]">
+              <span className="mb-1 block text-xs text-muted">Au</span>
+              <Input type="date" name="au" defaultValue={f.au} className="h-9" />
+            </label>
+            {f.statut && <input type="hidden" name="statut" value={f.statut} />}
+            {f.mode && <input type="hidden" name="mode" value={f.mode} />}
+            {f.etab && <input type="hidden" name="etab" value={f.etab} />}
+            {f.q && <input type="hidden" name="q" value={f.q} />}
+            <button className={buttonClass("brand")}>Appliquer</button>
+          </form>
+        </details>
+      </div>
+
+      {/* Répartition par mode de paiement (cliquer = filtrer) */}
+      <Card className="grid grid-cols-2 sm:grid-cols-5 sm:divide-x sm:divide-line [&>*]:min-w-0">
         {byMethod.map(({ m, n, paid }) => {
           const meta = METHOD_META[m];
           const I = meta.icon;
@@ -154,137 +209,56 @@ export default async function VentesPage({ searchParams }: { searchParams: Promi
             <Link
               key={m}
               href={`/ventes?${filtersQuery({ ...f, mode: on ? "" : m })}`}
-              className={cn("group rounded-2xl border bg-white p-4 shadow-card transition hover:-translate-y-0.5 hover:shadow-pop", on ? "ring-2" : "border-line")}
-              style={on ? { borderColor: meta.color, ["--tw-ring-color" as string]: `${meta.color}33` } : undefined}
+              scroll={false}
+              aria-pressed={on}
+              className={cn("block px-4 py-3 transition first:rounded-l-xl last:rounded-r-xl hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500/40", on && "bg-brand-50/60")}
             >
-              <div className="flex items-center justify-between gap-2">
-                <span className="grid size-10 place-items-center rounded-xl text-white shadow-sm" style={{ background: meta.color }}>
-                  <I className="size-5" />
-                </span>
-                <span className="text-xs font-semibold text-muted">{n} vente{n > 1 ? "s" : ""}</span>
-              </div>
-              <p className="mt-3 truncate font-display text-lg font-extrabold">{mad(paid)}</p>
-              <p className="truncate text-xs font-semibold text-slate-600">{meta.short}</p>
-              <span className="mt-2.5 block h-1.5 overflow-hidden rounded-full bg-canvas">
-                <span className="block h-full rounded-full" style={{ width: `${pct(paid, cashed)}%`, background: meta.color }} />
+              <span className="flex items-center gap-1.5 text-xs text-muted">
+                <I className={cn("size-3.5", on ? "text-brand-600" : "text-slate-400")} />
+                {meta.short}
+                <span className="ml-auto tabular-nums">{n}</span>
+              </span>
+              <span className="mt-1 block truncate text-sm font-semibold tabular-nums text-ink">{mad(paid)}</span>
+              <span className="mt-1.5 block h-1 overflow-hidden rounded-full bg-slate-100">
+                <span className="block h-full rounded-full bg-brand-500/70" style={{ width: `${pct(paid, cashed)}%` }} />
               </span>
             </Link>
           );
         })}
-      </div>
+      </Card>
 
       {/* Liste */}
-      <Card className="overflow-hidden">
-        <CardHeader title="Ventes" subtitle={`${sales.length} résultat${sales.length > 1 ? "s" : ""}${pages > 1 ? ` · page ${cur}/${pages}` : ""}`} icon={<Receipt className="size-4" />} />
-        {rows.length ? (
-          <>
-            {/* Bureau */}
-            <div className="hidden overflow-x-auto md:block">
-              <table className="w-full min-w-[820px] text-sm">
-                <thead>
-                  <tr className="border-y border-line bg-canvas/60 text-left text-[11px] font-bold uppercase tracking-wider text-muted">
-                    <th className="px-5 py-2.5">N°</th>
-                    <th className="px-3 py-2.5">Date</th>
-                    <th className="px-3 py-2.5">Client</th>
-                    {multi && <th className="px-3 py-2.5">Établissement</th>}
-                    <th className="px-3 py-2.5 text-right">Total</th>
-                    <th className="px-3 py-2.5 text-right">Payé</th>
-                    <th className="px-3 py-2.5">Statut</th>
-                    <th className="px-5 py-2.5">Mode</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-line">
-                  {rows.map((s) => {
-                    const c = s.contact_id ? contacts.get(s.contact_id) : undefined;
-                    return (
-                      <tr key={s.id} className={cn("group transition hover:bg-canvas/70", s.status === "remboursee" && "opacity-60")}>
-                        <td className="px-5 py-3">
-                          <Link href={`/ventes/${s.id}`} className="font-display text-[13px] font-bold text-brand-600 hover:underline">
-                            {s.number}
-                          </Link>
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-3 text-slate-600">
-                          {fmtDate(s.sold_at, { day: "2-digit", month: "short" })} <span className="text-muted">· {fmtTime(s.sold_at)}</span>
-                        </td>
-                        <td className="max-w-[220px] truncate px-3 py-3 font-medium">{c ? <Link href={`/contacts/${c.id}`} className="hover:text-brand-600 hover:underline">{c.full_name}</Link> : <span className="text-muted">Client de passage</span>}</td>
-                        {multi && (
-                          <td className="px-3 py-3">
-                            <EntityBadge id={s.entity_id} />
-                          </td>
-                        )}
-                        <td className="whitespace-nowrap px-3 py-3 text-right font-display font-extrabold">{mad(Number(s.total_mad))}</td>
-                        <td className={cn("whitespace-nowrap px-3 py-3 text-right font-semibold", Number(s.paid_mad) < Number(s.total_mad) && s.status !== "remboursee" ? "text-accent-700" : "text-slate-600")}>
-                          {mad(Number(s.paid_mad))}
-                        </td>
-                        <td className="px-3 py-3">
-                          <SaleStatusBadge status={s.status} />
-                        </td>
-                        <td className="px-5 py-3">
-                          <MethodChip method={s.method} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Mobile */}
-            <ul className="divide-y divide-line md:hidden">
-              {rows.map((s) => {
-                const c = s.contact_id ? contacts.get(s.contact_id) : undefined;
-                const M = METHOD_META[s.method].icon;
-                return (
-                  <li key={s.id}>
-                    <Link href={`/ventes/${s.id}`} className={cn("flex items-center gap-3 px-4 py-3 active:bg-canvas", s.status === "remboursee" && "opacity-60")}>
-                      <EntityMark id={s.entity_id} size={38} />
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-2">
-                          <span className="truncate text-sm font-semibold">{c?.full_name ?? "Client de passage"}</span>
-                        </span>
-                        <span className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
-                          <M className="size-3.5 shrink-0" style={{ color: METHOD_META[s.method].color }} />
-                          <span className="truncate">
-                            {s.number} · {fmtDate(s.sold_at, { day: "2-digit", month: "short" })} {fmtTime(s.sold_at)}
-                          </span>
-                        </span>
-                      </span>
-                      <span className="flex shrink-0 flex-col items-end gap-1">
-                        <span className="font-display text-sm font-extrabold">{mad(Number(s.total_mad))}</span>
-                        <SaleStatusBadge status={s.status} className="px-2 text-[10.5px]" />
-                      </span>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-
-            {pages > 1 && (
-              <div className="flex items-center justify-between gap-2 border-t border-line px-4 py-3">
-                {cur > 1 ? (
-                  <Link href={`/ventes?${filtersQuery(f, { page: String(cur - 1) })}`} className={buttonClass("secondary", "h-9")}>
-                    <ChevronLeft className="size-4" /> Précédent
-                  </Link>
-                ) : (
-                  <span />
-                )}
-                <span className="text-xs font-semibold text-muted">
-                  Page {cur} / {pages}
-                </span>
-                {cur < pages ? (
-                  <Link href={`/ventes?${filtersQuery(f, { page: String(cur + 1) })}`} className={buttonClass("secondary", "h-9")}>
-                    Suivant <ChevronRight className="size-4" />
-                  </Link>
-                ) : (
-                  <span />
-                )}
-              </div>
-            )}
-          </>
-        ) : (
-          <Empty icon={<Receipt className="size-6" />} title="Aucune vente" text="Aucune vente ne correspond à ces filtres sur la période choisie." action={<LinkButton href="/caisse"><ShoppingCart className="size-4" /> Ouvrir la caisse</LinkButton>} />
-        )}
-      </Card>
+      <DataTable
+        id="ventes"
+        columns={columns}
+        rows={rows}
+        total={sales.length}
+        selectable
+        query={f.q}
+        filtered={filtered}
+        clearHref={`/ventes?${filtersQuery({ ...f, q: "", statut: "", mode: "", etab: "" })}`}
+        unit={["vente", "ventes"]}
+        minWidth={780}
+        exportName={`ventes_${f.du}_${f.au}`}
+        toolbar={
+          <a href={`/api/export/ventes?${filtersQuery(f)}`} className={buttonClass("ghost", "h-8 px-2.5")} title="Export comptable détaillé (articles, remises, vendeur, notes)">
+            <FileSpreadsheet /> <span className="hidden sm:inline">Export comptable</span>
+            <span className="sr-only sm:hidden">Export comptable</span>
+          </a>
+        }
+        empty={
+          <Empty
+            icon={<Receipt />}
+            title="Aucune vente sur cette période"
+            text="Changez de période ou encaissez une première vente."
+            action={
+              <LinkButton href="/caisse">
+                <ShoppingCart /> Ouvrir la caisse
+              </LinkButton>
+            }
+          />
+        }
+      />
     </div>
   );
 }

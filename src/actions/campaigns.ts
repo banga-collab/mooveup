@@ -8,6 +8,7 @@ import type { EntityId } from "@/lib/entities";
 import type { ActivityKind, Campaign, CampaignChannel, Profile } from "@/lib/types";
 import { CHANNEL_LABEL, agadirToIso, str } from "@/lib/utils";
 import type { FormState } from "@/components/action-form";
+import { flash } from "@/lib/flash";
 import { firstName, parseSegment, personalize } from "@/components/campaigns/shared";
 import { resolveRecipients, type Recipient } from "@/components/campaigns/recipients";
 
@@ -103,6 +104,13 @@ export async function saveCampaign(_state: FormState, formData: FormData): Promi
   if (intent === "envoyer") await deliver(campaign, recipients, me);
 
   revalidatePath("/campagnes");
+  await flash(
+    intent === "envoyer"
+      ? `Campagne envoyée à ${recipients.length} destinataire${recipients.length > 1 ? "s" : ""}`
+      : intent === "programmer"
+        ? "Campagne programmée"
+        : "Brouillon enregistré",
+  );
   redirect(`/campagnes/${campaign.id}`);
 }
 
@@ -125,6 +133,7 @@ export async function sendCampaign(id: string) {
   await deliver(res.c, recipients, res.me);
   revalidatePath("/campagnes");
   revalidatePath(`/campagnes/${id}`);
+  await flash(`Campagne envoyée à ${recipients.length} destinataire${recipients.length > 1 ? "s" : ""}`);
 }
 
 /** Repasse une campagne programmée en brouillon */
@@ -135,6 +144,7 @@ export async function unscheduleCampaign(id: string) {
   await supabase.from("campaigns").update({ status: "brouillon", scheduled_at: null }).eq("id", id);
   revalidatePath("/campagnes");
   revalidatePath(`/campagnes/${id}`);
+  await flash("Programmation annulée · campagne en brouillon");
 }
 
 export async function deleteCampaign(id: string) {
@@ -143,5 +153,6 @@ export async function deleteCampaign(id: string) {
   const supabase = await createClient();
   await supabase.from("campaigns").delete().eq("id", id);
   revalidatePath("/campagnes");
+  await flash("Campagne supprimée");
   redirect("/campagnes");
 }

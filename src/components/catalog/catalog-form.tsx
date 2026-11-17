@@ -4,18 +4,20 @@ import { useState } from "react";
 import { Save } from "lucide-react";
 import { ActionForm, type FormState } from "@/components/action-form";
 import { SubmitButton } from "@/components/submit-button";
-import { EntityIcon } from "@/components/entity-icon";
 import { Field, Input } from "@/components/ui";
 import { CATALOG_KIND_LABEL, cn } from "@/lib/utils";
 import type { CatalogItem, CatalogKind } from "@/lib/types";
 import { KIND_META, KIND_ORDER } from "@/components/sales/meta";
 
 const KIND_HINT: Record<CatalogKind, string> = {
-  abonnement: "Accès pendant une durée (mois, trimestre, année)",
-  pack: "Un nombre de séances à consommer",
-  prestation: "Un soin ou un service sur rendez-vous",
-  produit: "Un article vendu en boutique",
+  abonnement: "Accès pendant une durée",
+  pack: "Un nombre de séances",
+  prestation: "Soin ou service sur RDV",
+  produit: "Article vendu en boutique",
 };
+
+const choice =
+  "rounded-lg border text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40";
 
 export function CatalogForm({
   action,
@@ -41,48 +43,49 @@ export function CatalogForm({
       <input type="hidden" name="kind" value={kind} />
 
       {/* Établissement */}
-      <div>
-        <p className="mb-2 text-xs font-semibold text-slate-600">Établissement</p>
-        <div className="flex flex-wrap gap-2">
-          {entities.map((e) => {
-            const on = e.id === entityId;
-            return (
-              <button
-                key={e.id}
-                type="button"
-                onClick={() => setEntityId(e.id)}
-                className={cn("inline-flex h-10 items-center gap-2 rounded-xl px-3.5 text-sm font-bold transition", on ? "text-white shadow-md" : "")}
-                style={on ? { background: e.color } : { background: e.soft, color: e.color }}
-              >
-                <EntityIcon id={e.id} className="size-4" strokeWidth={2.3} />
-                {e.short}
-              </button>
-            );
-          })}
+      {entities.length > 1 && (
+        <div>
+          <p className="mb-1.5 text-[13px] font-medium text-slate-700">Établissement</p>
+          <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Établissement">
+            {entities.map((e) => {
+              const on = e.id === entityId;
+              return (
+                <button
+                  key={e.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={on}
+                  onClick={() => setEntityId(e.id)}
+                  className={cn(choice, "inline-flex h-9 items-center gap-2 px-3 text-[13px] font-medium", on ? "border-brand-500 bg-brand-50 text-ink ring-1 ring-brand-500" : "border-line bg-white text-slate-600 hover:border-slate-300")}
+                >
+                  <span className="size-2 rounded-full" style={{ background: e.color }} />
+                  {e.short}
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Type */}
       <div>
-        <p className="mb-2 text-xs font-semibold text-slate-600">Type d&apos;article</p>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 [&>*]:min-w-0">
+        <p className="mb-1.5 text-[13px] font-medium text-slate-700">Type d&apos;article</p>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 [&>*]:min-w-0" role="radiogroup" aria-label="Type d'article">
           {KIND_ORDER.map((k) => {
-            const m = KIND_META[k];
-            const I = m.icon;
+            const I = KIND_META[k].icon;
             const on = k === kind;
             return (
               <button
                 key={k}
                 type="button"
+                role="radio"
+                aria-checked={on}
                 onClick={() => setKind(k)}
-                className={cn("rounded-2xl border p-3 text-left transition", on ? "shadow-md" : "border-line bg-white hover:border-slate-300")}
-                style={on ? { borderColor: m.color, background: m.soft } : undefined}
+                className={cn(choice, "p-3", on ? "border-brand-500 bg-brand-50 ring-1 ring-brand-500" : "border-line bg-white hover:border-slate-300")}
               >
-                <span className="grid size-9 place-items-center rounded-xl" style={{ background: on ? m.color : m.soft, color: on ? "#fff" : m.color }}>
-                  <I className="size-[18px]" />
-                </span>
-                <span className="mt-2 block text-sm font-bold">{CATALOG_KIND_LABEL[k]}</span>
-                <span className="mt-0.5 block text-[11px] leading-snug text-muted">{KIND_HINT[k]}</span>
+                <I className={cn("size-4", on ? "text-brand-600" : "text-slate-400")} />
+                <span className="mt-2 block text-[13px] font-semibold text-ink">{CATALOG_KIND_LABEL[k]}</span>
+                <span className="mt-0.5 block text-xs leading-snug text-muted">{KIND_HINT[k]}</span>
               </button>
             );
           })}
@@ -91,18 +94,23 @@ export function CatalogForm({
 
       <div className="grid gap-4 sm:grid-cols-2 [&>*]:min-w-0">
         <Field label="Nom" className="sm:col-span-2">
-          <Input name="name" required defaultValue={item?.name ?? ""} placeholder={kind === "abonnement" ? "Ex. Mensuel Musculation" : kind === "pack" ? "Ex. Pack 10 séances coaching" : kind === "prestation" ? "Ex. Massage relaxant 60 min" : "Ex. Huile d'argan 100 ml"} />
+          <Input
+            name="name"
+            required
+            defaultValue={item?.name ?? ""}
+            placeholder={kind === "abonnement" ? "Ex. Mensuel Musculation" : kind === "pack" ? "Ex. Pack 10 séances coaching" : kind === "prestation" ? "Ex. Massage relaxant 60 min" : "Ex. Huile d'argan 100 ml"}
+          />
+        </Field>
+        <Field label="Prix (MAD)">
+          <Input name="price_mad" inputMode="decimal" required defaultValue={item ? String(item.price_mad) : ""} placeholder="0" className="tabular-nums" />
         </Field>
         <Field label="Catégorie" hint="Sert aux filtres de la caisse">
-          <Input name="category" list="catalog-categories" defaultValue={item?.category ?? ""} placeholder="Ex. Boutique, Massage, Abonnements…" />
+          <Input name="category" list="catalog-categories" defaultValue={item?.category ?? ""} placeholder="Ex. Boutique, Massage…" />
           <datalist id="catalog-categories">
             {categories.map((c) => (
               <option key={c} value={c} />
             ))}
           </datalist>
-        </Field>
-        <Field label="Prix (MAD)">
-          <Input name="price_mad" inputMode="decimal" required defaultValue={item ? String(item.price_mad) : ""} placeholder="0" />
         </Field>
 
         {kind === "abonnement" && (
@@ -115,7 +123,7 @@ export function CatalogForm({
             <Field label="Nombre de séances">
               <Input name="sessions_count" inputMode="numeric" required defaultValue={item?.sessions_count ?? 10} />
             </Field>
-            <Field label="Validité (jours)" hint="Vide = 90 jours par défaut">
+            <Field label="Validité (jours)" hint="Vide = 90 jours">
               <Input name="duration_days" inputMode="numeric" defaultValue={item?.duration_days ?? ""} placeholder="90" />
             </Field>
           </>
@@ -126,23 +134,23 @@ export function CatalogForm({
           </Field>
         )}
         {kind === "produit" && (
-          <Field label="Stock" hint="Vide = stock non suivi. Décrémenté à chaque vente.">
+          <Field label="Stock" hint="Vide = non suivi. Décrémenté à chaque vente.">
             <Input name="stock" inputMode="numeric" defaultValue={item ? (item.stock ?? "") : 10} />
           </Field>
         )}
       </div>
 
-      <label className="flex items-center gap-3 rounded-2xl border border-line bg-canvas/50 px-4 py-3">
-        <input type="checkbox" name="active" defaultChecked={item?.active ?? true} className="size-5 accent-brand-500" />
+      <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-line px-4 py-3">
+        <input type="checkbox" name="active" defaultChecked={item?.active ?? true} className="size-4" />
         <span>
-          <span className="block text-sm font-semibold">Article actif</span>
+          <span className="block text-[13px] font-medium text-ink">Article actif</span>
           <span className="block text-xs text-muted">Visible et vendable à la caisse</span>
         </span>
       </label>
 
-      <div className="flex justify-end">
-        <SubmitButton className="h-11 rounded-2xl px-6">
-          <Save className="size-4" /> {item ? "Enregistrer" : "Ajouter l'article"}
+      <div className="flex justify-end border-t border-line pt-4">
+        <SubmitButton variant="brand">
+          <Save /> {item ? "Enregistrer" : "Ajouter l'article"}
         </SubmitButton>
       </div>
     </ActionForm>

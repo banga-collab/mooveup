@@ -12,8 +12,9 @@ export const getProfile = cache(async (): Promise<Profile> => {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
-  const { data } = await supabase.from("profiles").select("*").eq("id", user.id).single();
-  if (!data) redirect("/login");
+  const { data } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
+  // Connecté mais sans profil d'équipe : c'est un adhérent → son espace (évite la boucle /login ↔ /)
+  if (!data) redirect("/espace");
   return data as Profile;
 });
 

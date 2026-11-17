@@ -1,15 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AlertTriangle, CalendarClock, ClipboardList, DoorOpen, Save, UserRound } from "lucide-react";
+import { AlertTriangle, CalendarClock, ClipboardList, DoorOpen, Repeat, Save, UserRound } from "lucide-react";
 import type { EntityId } from "@/lib/entities";
 import type { AppointmentStatus } from "@/lib/types";
 import { APPT_STATUS_LABEL, agadirToIso, cn, fmtTime, mad } from "@/lib/utils";
+import { REPEAT_LABEL, type RepeatFreq } from "@/lib/types-agenda";
+import { MAX_OCCURRENCES, isFreq, seriesDates, shortDay } from "./recurrence";
 import { ActionForm, type FormState } from "@/components/action-form";
 import { ContactPicker, type PickerContact } from "@/components/contact-picker";
 import { SubmitButton } from "@/components/submit-button";
-import { Field, Input, SectionTitle, Select, Textarea } from "@/components/ui";
-import { EntityIcon } from "@/components/entity-icon";
+import { Field, Input, SectionTitle, Select, Textarea, buttonClass } from "@/components/ui";
 
 export type FormEntity = { id: EntityId; short: string; color: string; soft: string };
 export type FormItem = { id: string; entity_id: EntityId; kind: string; name: string; category: string; price_mad: number; duration_min: number | null };
@@ -30,6 +31,9 @@ export type AppointmentDefaults = {
   room: string;
   notes: string;
   status?: AppointmentStatus;
+  /** Rendez-vous rattaché à une série (modification) */
+  series_id?: string | null;
+  series_label?: string | null;
 };
 
 const OTHER = "__autre";
@@ -64,6 +68,11 @@ export function AppointmentForm({
   const [duration, setDuration] = useState(String(defaults.duration_min));
   const [price, setPrice] = useState(String(defaults.price_mad));
   const [room, setRoom] = useState(defaults.room);
+  const [repeat, setRepeat] = useState<RepeatFreq | "">("");
+  const [endMode, setEndMode] = useState<"count" | "until">("count");
+  const [count, setCount] = useState("6");
+  const [until, setUntil] = useState("");
+  const [applyTo, setApplyTo] = useState<"one" | "series">("one");
 
   const ent = entities.find((e) => e.id === entityId);
   const entItems = useMemo(() => items.filter((i) => i.entity_id === entityId), [items, entityId]);
@@ -105,6 +114,22 @@ export function AppointmentForm({
     };
   }, [busy, date, time, duration, staffId, room, entityId, defaults.id]);
 
+  // Séances de la série et dates en conflit avec l'agenda du praticien
+  const series = useMemo(() => {
+    if (!repeat || !date) return null;
+    const dates = seriesDates(date, repeat, endMode === "until" ? { until: until || null } : { count: Math.min(MAX_OCCURRENCES, Math.max(0, Number(count) || 0)) });
+    const dur = Number(duration);
+    const clash = new Set<string>();
+    if (staffId && dur && /^\d{1,2}:\d{2}$/.test(time)) {
+      for (const d of dates) {
+        const s = new Date(agadirToIso(d, time)).getTime();
+        const e = s + dur * 60000;
+        if (busy.some((b) => b.staff_id === staffId && new Date(b.starts_at).getTime() < e && s < new Date(b.starts_at).getTime() + b.duration_min * 60000)) clash.add(d);
+      }
+    }
+    return { dates, clash };
+  }, [repeat, date, endMode, until, count, staffId, time, duration, busy]);
+
   const endOf = (b: BusySlot) => new Date(new Date(b.starts_at).getTime() + b.duration_min * 60000).toISOString();
   const staffName = (id: string) => staff.find((s) => s.id === id)?.full_name ?? "Le praticien";
 
@@ -113,7 +138,7 @@ export function AppointmentForm({
       {defaults.id && <input type="hidden" name="id" value={defaults.id} />}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px] [&>*]:min-w-0">
-        <div className="rounded-3xl border border-line bg-white p-5 shadow-card sm:p-6">
+        <div className="rounded-xl border border-line bg-white p-5 sm:p-6">
           <SectionTitle icon={<UserRound className="size-4" />}>Client</SectionTitle>
           <Field label="Client">
             <ContactPicker contacts={contacts} defaultId={defaults.contact_id} required />
@@ -191,20 +216,116 @@ export function AppointmentForm({
           </div>
 
           {conflicts.staff && (
-            <p className="mt-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <p className="mt-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-[13px] text-red-700">
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
               <span>
-                <b>{staffName(conflicts.staff.staff_id ?? "")}</b> a déjà un rendez-vous de {fmtTime(conflicts.staff.starts_at)} à {fmtTime(endOf(conflicts.staff))} ({conflicts.staff.service}). Changez l&apos;horaire ou le praticien pour enregistrer.
+                <b className="font-semibold">{staffName(conflicts.staff.staff_id ?? "")}</b> a déjà un rendez-vous de {fmtTime(conflicts.staff.starts_at)} à {fmtTime(endOf(conflicts.staff))} ({conflicts.staff.service}). Changez l&apos;horaire ou le praticien pour enregistrer.
               </span>
             </p>
           )}
           {conflicts.room && (
-            <p className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <p className="mt-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-[13px] text-amber-800">
               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
               <span>
-                La salle <b>{room}</b> est déjà occupée de {fmtTime(conflicts.room.starts_at)} à {fmtTime(endOf(conflicts.room))} ({conflicts.room.service}). Vous pouvez enregistrer quand même.
+                La salle <b className="font-semibold">{room}</b> est déjà occupée de {fmtTime(conflicts.room.starts_at)} à {fmtTime(endOf(conflicts.room))} ({conflicts.room.service}). Vous pouvez enregistrer quand même.
               </span>
             </p>
+          )}
+
+          {/* Répétition (création) */}
+          {!defaults.id && (
+            <>
+              <SectionTitle icon={<Repeat className="size-4" />}>Répéter</SectionTitle>
+              <div className="grid gap-4 sm:grid-cols-3 [&>*]:min-w-0">
+                <Field label="Fréquence">
+                  <Select name="repeat" value={repeat} onChange={(e) => setRepeat(isFreq(e.target.value) ? e.target.value : "")}>
+                    <option value="">Ne pas répéter</option>
+                    {(Object.keys(REPEAT_LABEL) as RepeatFreq[]).map((f) => (
+                      <option key={f} value={f}>
+                        {REPEAT_LABEL[f]}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                {repeat && (
+                  <>
+                    <Field label="Fin">
+                      <Select name="repeat_end" value={endMode} onChange={(e) => setEndMode(e.target.value === "until" ? "until" : "count")}>
+                        <option value="count">Après N séances</option>
+                        <option value="until">Jusqu&apos;à une date</option>
+                      </Select>
+                    </Field>
+                    {endMode === "count" ? (
+                      <Field label="Nombre de séances">
+                        <Input type="number" name="repeat_count" value={count} onChange={(e) => setCount(e.target.value)} min={2} max={MAX_OCCURRENCES} required />
+                      </Field>
+                    ) : (
+                      <Field label="Dernière date">
+                        <Input type="date" name="repeat_until" value={until} min={date} onChange={(e) => setUntil(e.target.value)} required />
+                      </Field>
+                    )}
+                  </>
+                )}
+              </div>
+              {series && series.dates.length > 0 && (
+                <div className="mt-3 rounded-lg border border-line p-3">
+                  <p className="text-[13px] text-slate-700">
+                    <b className="font-semibold tabular-nums">{series.dates.length - series.clash.size}</b> séance{series.dates.length - series.clash.size > 1 ? "s" : ""} à {time || "--:--"}
+                    {series.clash.size > 0 && (
+                      <span className="text-red-700">
+                        {" "}
+                        · {series.clash.size} date{series.clash.size > 1 ? "s" : ""} en conflit
+                      </span>
+                    )}
+                  </p>
+                  <ul className="mt-2 flex flex-wrap gap-1.5">
+                    {series.dates.map((d) => (
+                      <li
+                        key={d}
+                        className={cn(
+                          "rounded-md px-1.5 py-0.5 text-[11.5px] font-medium capitalize tabular-nums",
+                          series.clash.has(d) ? "bg-red-50 text-red-700 line-through" : "bg-slate-100 text-slate-600",
+                        )}
+                        title={series.clash.has(d) ? "Le praticien est déjà pris à cet horaire" : undefined}
+                      >
+                        {shortDay(d)}
+                      </li>
+                    ))}
+                  </ul>
+                  {series.clash.size > 0 && (
+                    <label className="mt-3 flex items-start gap-2 text-[13px] text-slate-700">
+                      <input type="checkbox" name="skip_conflicts" value="1" className="mt-0.5 size-4 accent-brand-500" />
+                      <span>
+                        Créer la série <b className="font-semibold">sans ces {series.clash.size} date{series.clash.size > 1 ? "s" : ""}</b> (vous pourrez les reprogrammer à la main).
+                      </span>
+                    </label>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Modification d'une séance d'une série */}
+          {defaults.id && defaults.series_id && (
+            <>
+              <SectionTitle icon={<Repeat className="size-4" />}>Série{defaults.series_label ? ` · ${defaults.series_label}` : ""}</SectionTitle>
+              <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Appliquer la modification à">
+                {(
+                  [
+                    ["one", "Cette séance uniquement", "Les autres séances ne changent pas."],
+                    ["series", "Toute la série", "Cette séance et toutes les suivantes (même décalage, même heure)."],
+                  ] as const
+                ).map(([v, label, hint]) => (
+                  <label key={v} className={cn("flex cursor-pointer items-start gap-2.5 rounded-lg border p-3 transition", applyTo === v ? "border-brand-400 bg-brand-50/50" : "border-line hover:bg-slate-50")}>
+                    <input type="radio" name="apply_to" value={v} checked={applyTo === v} onChange={() => setApplyTo(v)} className="mt-0.5 size-4 accent-brand-500" />
+                    <span>
+                      <span className="block text-[13px] font-medium text-ink">{label}</span>
+                      <span className="block text-xs text-muted">{hint}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </>
           )}
 
           <SectionTitle>Notes</SectionTitle>
@@ -225,32 +346,41 @@ export function AppointmentForm({
 
         {/* Récapitulatif */}
         <aside className="space-y-4 lg:sticky lg:top-6 lg:self-start">
-          <div
-            className="relative overflow-hidden rounded-3xl p-5 text-white shadow-xl"
-            style={{ background: ent ? `linear-gradient(135deg, ${ent.color}, ${ent.color}cc)` : "linear-gradient(135deg,#1a6d8e,#3f8fae)" }}
-          >
-            <span className="pointer-events-none absolute -bottom-6 -right-6 text-white/15">
-              <EntityIcon id={entityId || null} className="size-32" />
-            </span>
-            <p className="relative text-xs font-bold uppercase tracking-wide text-white/80">{ent?.short ?? "Établissement"}</p>
-            <p className="relative mt-2 font-display text-xl font-extrabold leading-tight">{service || "Prestation à choisir"}</p>
-            <p className="relative mt-3 font-display text-3xl font-extrabold">{mad(Number(String(price).replace(",", ".")) || 0)}</p>
-            <div className="relative mt-3 flex flex-wrap gap-2 text-[11px] font-semibold">
-              <span className="rounded-full bg-white/20 px-2.5 py-1">{date ? new Intl.DateTimeFormat("fr-FR", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(`${date}T12:00:00Z`)) : "Date ?"}</span>
-              <span className="rounded-full bg-white/20 px-2.5 py-1">{time || "--:--"}</span>
-              <span className="rounded-full bg-white/20 px-2.5 py-1">{duration || "?"} min</span>
+          <div className="rounded-xl border border-line bg-white p-5">
+            <p className="flex items-center gap-1.5 text-xs font-medium text-slate-600">
+              {ent && <span className="size-2 rounded-full" style={{ background: ent.color }} />}
+              {ent?.short ?? "Établissement"}
+            </p>
+            <p className="mt-2 text-sm font-semibold leading-snug text-ink">{service || "Prestation à choisir"}</p>
+            <p className="mt-3 text-2xl font-semibold tracking-tight tabular-nums text-ink">{mad(Number(String(price).replace(",", ".")) || 0)}</p>
+            <dl className="mt-4 space-y-1.5 border-t border-line pt-3 text-[13px]">
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-muted">Date</dt>
+                <dd className="font-medium capitalize text-ink">
+                  {date ? new Intl.DateTimeFormat("fr-FR", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(`${date}T12:00:00Z`)) : "—"}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-muted">Heure</dt>
+                <dd className="font-medium tabular-nums text-ink">
+                  {time || "--:--"} · {duration || "?"} min
+                </dd>
+              </div>
               {room && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-white/20 px-2.5 py-1">
-                  <DoorOpen className="size-3" /> {room}
-                </span>
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-muted">Salle</dt>
+                  <dd className="inline-flex items-center gap-1 font-medium text-ink">
+                    <DoorOpen className="size-3.5 text-slate-400" /> {room}
+                  </dd>
+                </div>
               )}
-            </div>
+            </dl>
           </div>
           <div className="flex flex-col gap-2">
-            <SubmitButton className={cn("h-12 w-full rounded-2xl", conflicts.staff && "opacity-70")}>
-              <Save className="size-4" /> {defaults.id ? "Enregistrer les modifications" : "Créer le rendez-vous"}
+            <SubmitButton variant="brand" className={cn("h-10 w-full", conflicts.staff && "opacity-70")}>
+              <Save /> {defaults.id ? (applyTo === "series" ? "Enregistrer la série" : "Enregistrer") : series ? `Créer ${series.dates.length - series.clash.size} rendez-vous` : "Créer le rendez-vous"}
             </SubmitButton>
-            <a href={cancelHref} className="inline-flex h-11 items-center justify-center rounded-2xl text-sm font-semibold text-muted transition hover:bg-white hover:text-ink">
+            <a href={cancelHref} className={buttonClass("ghost", "w-full")}>
               Annuler
             </a>
           </div>

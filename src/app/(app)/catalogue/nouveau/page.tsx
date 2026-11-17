@@ -1,11 +1,10 @@
 import { redirect } from "next/navigation";
-import { PackagePlus } from "lucide-react";
 import { getProfile, getScope } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import type { CatalogItem, CatalogKind } from "@/lib/types";
 import { saveCatalogItem } from "@/actions/catalog";
 import { BackLink } from "@/components/back-link";
-import { Card, CardHeader, PageHeader } from "@/components/ui";
+import { Card, PageHeader } from "@/components/ui";
 import { CatalogForm } from "@/components/catalog/catalog-form";
 import { KIND_ORDER } from "@/components/sales/meta";
 
@@ -25,8 +24,7 @@ export default async function NewCatalogItemPage({ searchParams }: { searchParam
     <div className="mx-auto max-w-3xl">
       <PageHeader title="Nouvel article" subtitle="Ajoutez une formule, une prestation ou un produit au catalogue" back={<BackLink href="/catalogue" label="Catalogue" />} />
       <Card>
-        <CardHeader title="Article" subtitle="Les champs s'adaptent au type choisi" icon={<PackagePlus className="size-4" />} />
-        <div className="px-5 pb-5">
+        <div className="p-5">
           <CatalogForm
             action={saveCatalogItem.bind(null, null)}
             entities={scope.allowed.map((e) => ({ id: e.id, short: e.short, color: e.color, soft: e.soft }))}

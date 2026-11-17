@@ -8,6 +8,8 @@ import { entity, type EntityId } from "@/lib/entities";
 import { APPT_STATUS_LABEL, addDaysKey, agadirToIso, fmtDate, fmtTime, isoToAgadir, parseNum, str } from "@/lib/utils";
 import type { Appointment, AppointmentStatus, CatalogItem, Contact } from "@/lib/types";
 import type { FormState } from "@/components/action-form";
+import { logAudit } from "@/lib/audit";
+import { flash } from "@/lib/flash";
 
 const STATUSES: AppointmentStatus[] = ["prevu", "confirme", "arrive", "termine", "absent", "annule"];
 
@@ -130,6 +132,7 @@ export async function saveAppointment(_state: FormState, formData: FormData): Pr
   revalidatePath("/agenda");
   revalidatePath("/");
   revalidatePath(`/contacts/${contactId}`);
+  await flash(existing ? "Rendez-vous modifié" : `Rendez-vous ajouté · ${fmtDate(startsAt, { day: "numeric", month: "short" })} à ${fmtTime(startsAt)}`);
   redirect(`/agenda?date=${isoToAgadir(startsAt).date}`);
 }
 
@@ -155,18 +158,30 @@ export async function setAppointmentStatus(id: string, status: AppointmentStatus
   revalidatePath("/agenda");
   revalidatePath("/");
   revalidatePath(`/contacts/${appt.contact_id}`);
+  await flash(`Rendez-vous : ${APPT_STATUS_LABEL[status].toLowerCase()}`);
 }
 
 /** Supprime un rendez-vous puis revient à l'agenda du jour concerné. */
 export async function deleteAppointment(id: string) {
-  const scope = await getScope();
+  const [profile, scope] = await Promise.all([getProfile(), getScope()]);
   const supabase = await createClient();
   const { data } = await supabase.from("appointments").select("*").eq("id", id).in("entity_id", scope.allowed.map((e) => e.id)).maybeSingle();
   const appt = data as Appointment | null;
   if (!appt) redirect("/agenda");
   await supabase.from("appointments").delete().eq("id", id);
+  const { data: who } = await supabase.from("contacts").select("full_name").eq("id", appt.contact_id).maybeSingle();
+  await logAudit({
+    action: "rdv.suppression",
+    entity_id: appt.entity_id,
+    target_type: "appointment",
+    target_id: null,
+    summary: `Rendez-vous supprimé : ${appt.service}${who ? ` de ${(who as { full_name: string }).full_name}` : ""} prévu le ${fmtDate(appt.starts_at, { day: "numeric", month: "long" })} à ${fmtTime(appt.starts_at)}`,
+    actor: profile,
+    meta: { contact_id: appt.contact_id },
+  });
   revalidatePath("/agenda");
   revalidatePath("/");
   revalidatePath(`/contacts/${appt.contact_id}`);
+  await flash("Rendez-vous supprimé");
   redirect(`/agenda?date=${isoToAgadir(appt.starts_at).date}`);
 }

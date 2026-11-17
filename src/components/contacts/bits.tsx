@@ -29,18 +29,19 @@ export function WhatsAppButton({ phone, text, className, label }: { phone: strin
       target="_blank"
       rel="noopener noreferrer"
       title="Écrire sur WhatsApp"
+      aria-label={label ? undefined : "Écrire sur WhatsApp"}
       className={cn(
-        "inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-emerald-500 px-2.5 text-xs font-bold text-white shadow-sm shadow-emerald-500/25 transition hover:-translate-y-0.5 hover:bg-emerald-600",
+        "inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-3 text-[13px] font-medium text-slate-700 transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40",
         !label && "w-9 px-0",
         className,
       )}
     >
-      <WhatsAppIcon className="size-4" />
+      <WhatsAppIcon className="size-4 text-emerald-600" />
       {label}
     </a>
   );
 }
 
 export function TagChip({ children }: { children: React.ReactNode }) {
-  return <span className="inline-flex items-center rounded-md bg-accent-50 px-1.5 py-0.5 text-[11px] font-semibold text-accent-700 ring-1 ring-inset ring-accent-100">{children}</span>;
+  return <span className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">{children}</span>;
 }

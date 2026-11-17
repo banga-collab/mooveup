@@ -7,6 +7,9 @@ import { createClient } from "@/lib/supabase/server";
 import { parseNum, str } from "@/lib/utils";
 import type { CatalogItem, CatalogKind } from "@/lib/types";
 import type { FormState } from "@/components/action-form";
+import { logAudit } from "@/lib/audit";
+import { flash } from "@/lib/flash";
+import { recordUndo } from "@/lib/undo";
 
 const KINDS: CatalogKind[] = ["abonnement", "pack", "prestation", "produit"];
 
@@ -14,7 +17,7 @@ const KINDS: CatalogKind[] = ["abonnement", "pack", "prestation", "produit"];
 async function guard() {
   const [profile, scope] = await Promise.all([getProfile(), getScope()]);
   const ok = profile.role === "direction" || profile.role === "manager";
-  return { ok, scope, supabase: await createClient() };
+  return { ok, scope, profile, supabase: await createClient() };
 }
 
 async function loadItem(id: string) {
@@ -64,8 +67,21 @@ export async function saveCatalogItem(id: string | null, _state: FormState, form
   const { error } = id ? await g.supabase.from("catalog_items").update(row).eq("id", id) : await g.supabase.from("catalog_items").insert(row);
   if (error) return { error: error.message };
 
+  if (g.item && Number(g.item.price_mad) !== row.price_mad) {
+    await logAudit({
+      action: "catalogue.prix",
+      entity_id,
+      target_type: "catalog_item",
+      target_id: g.item.id,
+      summary: `Prix de « ${row.name} » : ${Number(g.item.price_mad)} → ${row.price_mad} MAD`,
+      actor: g.profile,
+      meta: { old: Number(g.item.price_mad), new: row.price_mad },
+    });
+  }
+
   revalidatePath("/catalogue");
   revalidatePath("/caisse");
+  await flash(id ? `« ${row.name} » mis à jour` : `« ${row.name} » ajouté au catalogue`);
   redirect(`/catalogue?type=${kind}#${entity_id}`);
 }
 
@@ -76,16 +92,28 @@ export async function toggleCatalogItem(id: string) {
     await supabase.from("catalog_items").update({ active: !item.active }).eq("id", id);
     revalidatePath("/catalogue");
     revalidatePath("/caisse");
+    const undo = item.active ? await recordUndo("catalogue.desactivation", { ops: [{ op: "update", table: "catalog_items", id, values: { active: true } }], message: `« ${item.name} » réactivé` }) : null;
+    await flash(item.active ? `« ${item.name} » masqué à la caisse` : `« ${item.name} » réactivé`, "success", { undo });
   }
 }
 
 /** Supprime un article (les ventes passées gardent leur libellé) */
 export async function deleteCatalogItem(id: string) {
-  const { item, supabase } = await loadItem(id);
+  const { item, supabase, profile } = await loadItem(id);
   if (item) {
     await supabase.from("catalog_items").delete().eq("id", id);
+    await logAudit({
+      action: "catalogue.suppression",
+      entity_id: item.entity_id,
+      target_type: "catalog_item",
+      target_id: null,
+      summary: `Article « ${item.name} » (${item.price_mad} MAD) supprimé du catalogue`,
+      actor: profile,
+    });
     revalidatePath("/catalogue");
     revalidatePath("/caisse");
+    const undo = await recordUndo("catalogue.suppression", { ops: [{ op: "restore", table: "catalog_items", rows: [item] }], message: `« ${item.name} » remis au catalogue` });
+    await flash("Article supprimé", "success", { undo });
   }
   redirect("/catalogue");
 }

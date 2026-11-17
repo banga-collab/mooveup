@@ -17,7 +17,6 @@ function Fields({ entities, defaultEntity, team, contacts, meId, today }: { enti
   const [eid, setEid] = useState(defaultEntity);
   const [prio, setPrio] = useState<TaskPriority>("normale");
   const members = team.filter((m) => !m.entity_ids.length || m.entity_ids.includes(eid));
-  const color = entities.find((e) => e.id === eid)?.color ?? "#1a6d8e";
 
   return (
     <div className="space-y-3.5">
@@ -26,7 +25,7 @@ function Fields({ entities, defaultEntity, team, contacts, meId, today }: { enti
       </Field>
       <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 [&>*]:min-w-0">
         <Field label="Établissement">
-          <Select name="entity_id" value={eid} onChange={(e) => setEid(e.target.value)} style={{ borderLeft: `4px solid ${color}` }}>
+          <Select name="entity_id" value={eid} onChange={(e) => setEid(e.target.value)}>
             {entities.map((e) => (
               <option key={e.id} value={e.id}>
                 {e.short}
@@ -46,10 +45,10 @@ function Fields({ entities, defaultEntity, team, contacts, meId, today }: { enti
         <Field label="Échéance">
           <Input type="date" name="due_date" defaultValue={today} />
         </Field>
-        <div>
-          <span className="mb-1.5 block text-xs font-semibold text-slate-600">Priorité</span>
+        <div role="group" aria-label="Priorité">
+          <span className="mb-1.5 block text-[13px] font-medium text-slate-700">Priorité</span>
           <input type="hidden" name="priority" value={prio} />
-          <div className="grid h-11 grid-cols-3 gap-1 rounded-xl border border-line bg-canvas p-1">
+          <div className="grid h-10 grid-cols-3 gap-0.5 rounded-lg bg-slate-100 p-0.5">
             {(["basse", "normale", "haute"] as const).map((p) => {
               const on = prio === p;
               const m = PRIORITY_META[p];
@@ -58,8 +57,10 @@ function Fields({ entities, defaultEntity, team, contacts, meId, today }: { enti
                   key={p}
                   type="button"
                   onClick={() => setPrio(p)}
-                  className={cn("rounded-lg text-xs font-bold transition", on ? "bg-white shadow-sm" : "text-muted hover:text-ink")}
-                  style={on ? { color: m.color } : undefined}
+                  className={cn(
+                    "rounded-md text-[13px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40",
+                    on ? (p === "haute" ? "bg-white text-red-600 shadow-sm" : "bg-white text-ink shadow-sm") : "text-slate-500 hover:text-ink",
+                  )}
                   aria-pressed={on}
                 >
                   {m.label}
@@ -82,18 +83,18 @@ export function TaskQuickForm(props: { entities: Ent[]; defaultEntity: string; t
   return (
     <form action={action} className="space-y-4">
       {state?.error && (
-        <p className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-700">
+        <p role="alert" className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-700">
           <AlertCircle className="mt-0.5 size-4 shrink-0" /> {state.error}
         </p>
       )}
       {state?.ok && !pending && (
-        <p key={state.ok} className="flex animate-fade-up items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-sm font-medium text-emerald-700">
+        <p key={state.ok} role="status" className="flex animate-fade-up items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-sm text-emerald-700">
           <CheckCircle2 className="size-4 shrink-0" /> Tâche ajoutée.
         </p>
       )}
       <Fields key={state?.ok ?? 0} {...props} />
-      <button type="submit" disabled={pending} className={buttonClass("primary", "w-full")}>
-        {pending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} Ajouter la tâche
+      <button type="submit" disabled={pending} className={buttonClass("brand", "w-full")}>
+        {pending ? <Loader2 className="animate-spin" /> : <Plus />} Ajouter la tâche
       </button>
     </form>
   );

@@ -5,6 +5,7 @@
  */
 import { ENTITIES, type EntityId } from "./entities";
 import { agadirToIso, dayKey, addDaysKey } from "./utils";
+import { extendSeed } from "./seed";
 
 type Row = Record<string, any>;
 
@@ -33,7 +34,8 @@ const at = (offset: number, hhmm: string) => agadirToIso(day(offset), hhmm);
 
 const FIRST_F = ["Salma", "Nadia", "Imane", "Leila", "Khadija", "Fatima Zahra", "Sara", "Hajar", "Meryem", "Asmae", "Ghita", "Nour", "Houda", "Zineb", "Yasmine", "Loubna", "Wiam", "Kawtar", "Rim", "Amal"];
 const FIRST_H = ["Karim", "Youssef", "Omar", "Mehdi", "Hamza", "Anas", "Reda", "Amine", "Ayoub", "Othmane", "Yassir", "Ilyas", "Soufiane", "Badr", "Nabil", "Adil", "Rachid", "Hicham", "Zakaria", "Ismail"];
-const KIDS = ["Adam", "Rayan", "Inès", "Lina", "Yanis", "Aya", "Sami", "Malak", "Ilyan", "Jana", "Ziyad", "Hiba"];
+const KIDS_H = ["Adam", "Rayan", "Yanis", "Sami", "Ilyan", "Ziyad"];
+const KIDS_F = ["Inès", "Lina", "Aya", "Malak", "Jana", "Hiba"];
 const LAST = ["El Amrani", "Bennani", "Ait Lahcen", "Ouhammou", "Tazi", "Chraibi", "Alaoui", "Benjelloun", "Berrada", "Idrissi", "Fassi", "Amzil", "Ouaziz", "Boutaleb", "Lahlou", "Naciri", "Benali", "Ait Baha", "Oukacha", "Bouzid", "Kabbaj", "Saadi", "Talbi", "Ennaji"];
 const CITIES = ["Agadir", "Agadir", "Agadir", "Agadir", "Inezgane", "Aourir", "Dcheira", "Tikiouine", "Anza"];
 const SOURCES = ["instagram", "instagram", "facebook", "whatsapp", "passage", "passage", "telephone", "parrainage", "site", "google"] as const;
@@ -174,7 +176,7 @@ export function seed(): Record<string, Row[]> {
       const sex: "H" | "F" = eid === "lady" || eid === "institut" ? "F" : eid === "evolve" || eid === "power" ? (rnd() < 0.85 ? "H" : "F") : rnd() < 0.5 ? "H" : "F";
       const last = pick(LAST);
       const kid = eid === "kids";
-      const first = kid ? pick(KIDS) : sex === "F" ? pick(FIRST_F) : pick(FIRST_H);
+      const first = kid ? (sex === "F" ? pick(KIDS_F) : pick(KIDS_H)) : sex === "F" ? pick(FIRST_F) : pick(FIRST_H);
       const ents: EntityId[] = [eid];
       // Ventes croisées : une adhérente Lady va aussi à l'institut, etc.
       if (eid === "lady" && rnd() < 0.35) ents.push("institut");
@@ -382,7 +384,7 @@ export function seed(): Record<string, Row[]> {
     const e = pick(ENTITIES);
     const sex = e.id === "lady" || e.id === "institut" ? "F" : e.id === "evolve" || e.id === "power" ? "H" : rnd() < 0.5 ? "H" : "F";
     const last = pick(LAST);
-    const first = e.id === "kids" ? pick(KIDS) : sex === "F" ? pick(FIRST_F) : pick(FIRST_H);
+    const first = e.id === "kids" ? (sex === "F" ? pick(KIDS_F) : pick(KIDS_H)) : sex === "F" ? pick(FIRST_F) : pick(FIRST_H);
     const created = int(1, 60);
     const source = pick(SOURCES);
     const c = {
@@ -516,5 +518,6 @@ export function seed(): Record<string, Row[]> {
     },
   ];
 
-  return { profiles, catalog_items, contacts, subscriptions, appointments, sales, sale_items, leads, activities, tasks, campaigns };
+  const base = { profiles, catalog_items, contacts, subscriptions, appointments, sales, sale_items, leads, activities, tasks, campaigns };
+  return { ...base, ...extendSeed(base, { uid, rnd, pick, int, day, at }) };
 }

@@ -1,33 +1,37 @@
-import Link from "next/link";
-import { CalendarDays, CalendarPlus, Search, ShoppingCart, UserPlus } from "lucide-react";
-import { fmtDate } from "@/lib/utils";
-import { buttonClass } from "./ui";
+"use client";
 
-/** Barre du haut (bureau) : recherche globale + actions rapides */
+import Link from "next/link";
+import { CalendarPlus, Search, ShoppingCart, UserPlus } from "lucide-react";
+import { useT } from "@/lib/i18n/client";
+import { buttonClass, Kbd } from "./ui";
+import { NotificationBell } from "./shell/bell";
+
+/** Barre du haut (bureau) : recherche universelle (Ctrl+K), cloche, 3 actions fréquentes */
 export function Topbar() {
+  const t = useT();
   return (
-    <div className="no-print mb-7 hidden items-center gap-3 lg:flex">
-      <form action="/contacts" className="group relative max-w-md flex-1">
-        <Search className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-slate-400 transition group-focus-within:text-brand-500" />
-        <input
-          name="q"
-          placeholder="Rechercher un client, un téléphone…"
-          className="h-11 w-full rounded-2xl border border-line bg-white pl-11 pr-4 text-sm shadow-card transition placeholder:text-slate-400 focus:border-brand-300 focus:outline-none focus:ring-4 focus:ring-brand-50"
-        />
-      </form>
-      <div className="ml-auto flex items-center gap-2">
-        <span className="hidden items-center gap-2 rounded-2xl border border-line bg-white px-3.5 py-2.5 text-sm font-medium capitalize text-slate-600 shadow-card 2xl:inline-flex">
-          <CalendarDays className="size-4 text-accent-500" />
-          {fmtDate(new Date(), { weekday: "long", day: "numeric", month: "long" })}
+    <div className="no-print mb-6 hidden items-center gap-2 lg:flex">
+      <button
+        type="button"
+        onClick={() => window.dispatchEvent(new Event("open-palette"))}
+        className="flex h-9 w-full max-w-sm items-center gap-2.5 rounded-lg border border-line bg-white px-3 text-start text-[13px] text-slate-400 transition hover:border-slate-300"
+      >
+        <Search className="size-4" aria-hidden />
+        <span className="flex-1 truncate">{t("top.searchPlaceholder")}</span>
+        <span dir="ltr">
+          <Kbd>Ctrl K</Kbd>
         </span>
-        <Link href="/contacts/nouveau" className={buttonClass("secondary", "h-11 rounded-2xl")} title="Nouveau contact">
-          <UserPlus className="size-4" /> <span className="hidden xl:inline">Contact</span>
+      </button>
+      <div className="ms-auto flex items-center gap-2">
+        <Link href="/contacts/nouveau" className={buttonClass("ghost")} title={t("top.shortcutHint", { key: "N" })}>
+          <UserPlus /> {t("top.client")}
         </Link>
-        <Link href="/agenda/nouveau" className={buttonClass("secondary", "h-11 rounded-2xl")} title="Nouveau rendez-vous">
-          <CalendarPlus className="size-4" /> <span className="hidden xl:inline">Rendez-vous</span>
+        <Link href="/agenda/nouveau" className={buttonClass("ghost")} title={t("top.shortcutHint", { key: "R" })}>
+          <CalendarPlus /> {t("top.rdv")}
         </Link>
-        <Link href="/caisse" className={buttonClass("primary", "h-11 rounded-2xl")}>
-          <ShoppingCart className="size-4" /> Encaisser
+        <NotificationBell />
+        <Link href="/caisse" className={buttonClass("primary")} title={t("top.shortcutHint", { key: "V" })}>
+          <ShoppingCart /> {t("top.sell")}
         </Link>
       </div>
     </div>

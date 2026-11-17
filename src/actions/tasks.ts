@@ -5,6 +5,8 @@ import { getProfile, getScope } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import type { Task, TaskPriority } from "@/lib/types";
 import { str } from "@/lib/utils";
+import { flash } from "@/lib/flash";
+import { recordUndo } from "@/lib/undo";
 
 export type TaskFormState = { error?: string; ok?: number } | undefined;
 
@@ -57,6 +59,7 @@ export async function createTask(_state: TaskFormState, formData: FormData): Pro
   if (error) return { error: "Impossible d'enregistrer la tâche." };
 
   refresh();
+  await flash("Tâche ajoutée");
   return { ok: Date.now() };
 }
 
@@ -72,17 +75,26 @@ async function ownTask(id: string) {
   return { task, supabase };
 }
 
-/** Coche / décoche une tâche */
-export async function toggleTask(id: string) {
+/** Coche / décoche une tâche (terminer est annulable 5 s) */
+export async function toggleTask(id: string): Promise<{ error?: string }> {
   const res = await ownTask(id);
-  if (!res) return;
-  await res.supabase.from("tasks").update({ done: !res.task.done }).eq("id", id);
+  if (!res) return { error: "Tâche introuvable ou hors de votre périmètre." };
+  const { error } = await res.supabase.from("tasks").update({ done: !res.task.done }).eq("id", id);
+  if (error) return { error: "Impossible de mettre à jour la tâche." };
   refresh();
+  const undo = res.task.done ? null : await recordUndo("tache.terminee", { ops: [{ op: "update", table: "tasks", id, values: { done: false } }], message: "Tâche rouverte" });
+  await flash(res.task.done ? "Tâche rouverte" : "Tâche terminée", "success", { undo });
+  return {};
 }
 
-export async function deleteTask(id: string) {
+/** Supprime une tâche (annulable 5 s) */
+export async function deleteTask(id: string): Promise<{ error?: string }> {
   const res = await ownTask(id);
-  if (!res) return;
-  await res.supabase.from("tasks").delete().eq("id", id);
+  if (!res) return { error: "Tâche introuvable ou hors de votre périmètre." };
+  const { error } = await res.supabase.from("tasks").delete().eq("id", id);
+  if (error) return { error: "Impossible de supprimer la tâche." };
   refresh();
+  const undo = await recordUndo("tache.suppression", { ops: [{ op: "restore", table: "tasks", rows: [res.task] }], message: "Tâche restaurée" });
+  await flash("Tâche supprimée", "success", { undo });
+  return {};
 }

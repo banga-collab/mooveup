@@ -43,7 +43,7 @@ export function param(v: string | string[] | undefined) {
 
 export const TAG_SUGGESTIONS = ["VIP", "Parrain", "Entreprise partenaire", "Suivi médical", "Mariée 2026", "Étudiant", "Famille", "Ambassadeur"];
 
-export const STATUS_TONE: Record<ContactStatus, "green" | "accent" | "gray"> = { client: "green", prospect: "accent", ancien: "gray" };
+export const STATUS_TONE: Record<ContactStatus, "green" | "brand" | "gray"> = { client: "green", prospect: "brand", ancien: "gray" };
 
 export const SOURCES = Object.entries(SOURCE_LABEL) as [LeadSource, string][];
 

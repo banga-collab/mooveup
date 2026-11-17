@@ -1,6 +1,8 @@
 import { getScope } from "@/lib/auth";
+import { createClient } from "@/lib/supabase/server";
+import { entity, type EntityId } from "@/lib/entities";
 import { dayKey } from "@/lib/utils";
-import { saveAppointment } from "@/actions/agenda";
+import { saveAppointmentPlus } from "@/actions/agenda-plus";
 import { PageHeader } from "@/components/ui";
 import { BackLink } from "@/components/back-link";
 import { AppointmentForm } from "@/components/agenda/appointment-form";
@@ -23,14 +25,21 @@ export default async function NewAppointmentPage({ searchParams }: { searchParam
   const time = sp.heure && /^\d{2}:\d{2}$/.test(sp.heure) ? sp.heure : date === dayKey() ? nextSlot() : "09:00";
   const data = await loadAppointmentFormData(scope, { extraContactId: sp.contact ?? null, aroundDate: date });
   const staffOk = sp.staff && data.staff.some((s) => s.id === sp.staff) ? sp.staff : null;
-  const entityId = scope.current?.id ?? (staffOk ? data.staff.find((s) => s.id === staffOk)?.entity_ids.find((e) => scope.allowed.some((a) => a.id === e)) : undefined) ?? scope.allowed[0]?.id ?? null;
+  // Établissement proposé : celui du client (de préférence institut, clinique ou barbier, où l'on prend rendez-vous)
+  let contactEntity: EntityId | undefined;
+  if (sp.contact && !scope.current) {
+    const { data: c } = await (await createClient()).from("contacts").select("entity_ids").eq("id", sp.contact).maybeSingle();
+    const ids = ((c as { entity_ids?: EntityId[] } | null)?.entity_ids ?? []).filter((e) => scope.allowed.some((a) => a.id === e));
+    contactEntity = ids.find((e) => entity(e)?.kind !== "sport") ?? ids[0];
+  }
+  const entityId = scope.current?.id ?? contactEntity ?? (staffOk ? data.staff.find((s) => s.id === staffOk)?.entity_ids.find((e) => scope.allowed.some((a) => a.id === e)) : undefined) ?? scope.allowed[0]?.id ?? null;
   const back = sp.contact ? `/contacts/${sp.contact}` : `/agenda?date=${date}`;
 
   return (
     <div>
       <PageHeader title="Nouveau rendez-vous" subtitle="Réservez une prestation pour un client" back={<BackLink href={back} label={sp.contact ? "Retour à la fiche" : "Retour à l'agenda"} />} />
       <AppointmentForm
-        action={saveAppointment}
+        action={saveAppointmentPlus}
         {...data}
         cancelHref={back}
         defaults={{

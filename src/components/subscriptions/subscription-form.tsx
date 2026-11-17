@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { BadgePercent, CalendarRange, CreditCard, Package, RefreshCw, Save, UserRound } from "lucide-react";
 import type { EntityId } from "@/lib/entities";
 import type { PayMethod } from "@/lib/types";
@@ -8,8 +8,7 @@ import { PAY_LABEL, addDaysKey, cn, mad } from "@/lib/utils";
 import { ActionForm, type FormState } from "@/components/action-form";
 import { ContactPicker, type PickerContact } from "@/components/contact-picker";
 import { SubmitButton } from "@/components/submit-button";
-import { Field, Input, SectionTitle, Select } from "@/components/ui";
-import { EntityIcon } from "@/components/entity-icon";
+import { Field, Input, SectionTitle, Select, buttonClass } from "@/components/ui";
 
 export type PlanEntity = { id: EntityId; short: string; color: string };
 export type Plan = { id: string; entity_id: EntityId; kind: "abonnement" | "pack"; name: string; category: string; price_mad: number; duration_days: number | null; sessions_count: number | null };
@@ -27,6 +26,7 @@ export function SubscriptionForm({
   plans,
   defaultContactId,
   defaultEntityId,
+  defaultPlanId,
   today,
   cancelHref,
 }: {
@@ -36,6 +36,8 @@ export function SubscriptionForm({
   plans: Plan[];
   defaultContactId: string | null;
   defaultEntityId: EntityId | null;
+  /** Formule pré-choisie (ex. « Renouveler » depuis l'accueil : ?formule=…) */
+  defaultPlanId?: string | null;
   today: string;
   cancelHref: string;
 }) {
@@ -67,6 +69,15 @@ export function SubscriptionForm({
     setDiscount("0");
     setPaidTouched(false);
   };
+
+  // Formule pré-choisie : prix, durée et séances remplis dès l'ouverture
+  const presetDone = useRef(false);
+  useEffect(() => {
+    if (presetDone.current || !defaultPlanId) return;
+    presetDone.current = true;
+    if (plans.some((p) => p.id === defaultPlanId)) choosePlan(defaultPlanId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultPlanId]);
   const changeEntity = (id: EntityId) => {
     setEntityId(id);
     if (plan && plan.entity_id !== id) {
@@ -79,7 +90,7 @@ export function SubscriptionForm({
   return (
     <ActionForm action={action}>
       <div className="grid gap-6 lg:grid-cols-[1fr_320px] [&>*]:min-w-0">
-        <div className="rounded-3xl border border-line bg-white p-5 shadow-card sm:p-6">
+        <div className="rounded-xl border border-line bg-white p-5 sm:p-6">
           <SectionTitle icon={<UserRound className="size-4" />}>Client</SectionTitle>
           <Field label="Client">
             <ContactPicker contacts={contacts} defaultId={defaultContactId} required />
@@ -166,20 +177,18 @@ export function SubscriptionForm({
                 key={p}
                 type="button"
                 onClick={() => setDiscount(String(Math.round((num(price) * p) / 100)))}
-                className="inline-flex h-8 items-center gap-1 rounded-lg border border-line bg-white px-2.5 text-xs font-semibold text-slate-600 hover:border-accent-200 hover:text-accent-600"
+                className={buttonClass("secondary", "px-3 text-xs")}
               >
-                <BadgePercent className="size-3.5" /> −{p} %
+                <BadgePercent /> −{p} %
               </button>
             ))}
           </div>
 
-          <label className="mt-6 flex cursor-pointer items-center gap-3 rounded-2xl border border-line p-4 transition hover:bg-canvas">
-            <input type="checkbox" name="auto_renew" className="size-5 accent-[#1a6d8e]" />
-            <span className="grid size-9 place-items-center rounded-xl bg-brand-50 text-brand-500">
-              <RefreshCw className="size-4" />
-            </span>
+          <label className="mt-6 flex cursor-pointer items-center gap-3 rounded-lg border border-line p-3.5 transition hover:bg-slate-50">
+            <input type="checkbox" name="auto_renew" className="size-4" />
+            <RefreshCw className="size-4 shrink-0 text-slate-400" />
             <span className="min-w-0">
-              <span className="block text-sm font-semibold text-ink">Renouvellement automatique</span>
+              <span className="block text-sm font-medium text-ink">Renouvellement automatique</span>
               <span className="block text-xs text-muted">À proposer au client à la fin de la période</span>
             </span>
           </label>
@@ -187,38 +196,44 @@ export function SubscriptionForm({
 
         {/* Récapitulatif */}
         <aside className="space-y-4 lg:sticky lg:top-6 lg:self-start">
-          <div className="relative overflow-hidden rounded-3xl p-5 text-white shadow-xl" style={{ background: ent ? `linear-gradient(135deg, ${ent.color}, ${ent.color}cc)` : "linear-gradient(135deg,#1a6d8e,#3f8fae)" }}>
-            <span className="pointer-events-none absolute -bottom-6 -right-6 text-white/15">
-              <EntityIcon id={entityId || null} className="size-32" />
-            </span>
-            <p className="relative text-xs font-bold uppercase tracking-wide text-white/80">{ent?.short ?? "Établissement"}</p>
-            <p className="relative mt-2 font-display text-xl font-extrabold leading-tight">{plan?.name ?? "Formule à choisir"}</p>
-            <p className="relative mt-3 font-display text-3xl font-extrabold">{mad(total)}</p>
-            {num(discount) > 0 && <p className="relative text-xs text-white/80">au lieu de {mad(num(price))}</p>}
-            <div className="relative mt-3 flex flex-wrap gap-2 text-[11px] font-semibold">
+          <div className="rounded-xl border border-line bg-white p-5">
+            <p className="flex items-center gap-1.5 text-xs font-medium text-slate-600">
+              {ent && <span className="size-2 rounded-full" style={{ background: ent.color }} />}
+              {ent?.short ?? "Établissement"}
+            </p>
+            <p className="mt-2 text-sm font-semibold leading-snug text-ink">{plan?.name ?? "Formule à choisir"}</p>
+            <p className="mt-3 text-2xl font-semibold tracking-tight tabular-nums text-ink">{mad(total)}</p>
+            {num(discount) > 0 && <p className="text-xs tabular-nums text-muted line-through">{mad(num(price))}</p>}
+            <dl className="mt-4 space-y-1.5 border-t border-line pt-3 text-[13px]">
               {end && (
-                <span className="rounded-full bg-white/20 px-2.5 py-1">
-                  {fmt(start)} → {fmt(end)}
-                </span>
+                <div className="flex justify-between gap-3">
+                  <dt className="text-muted">Période</dt>
+                  <dd className="text-right font-medium tabular-nums text-ink">
+                    {fmt(start)} → {fmt(end)}
+                  </dd>
+                </div>
               )}
-              {plan?.kind === "pack" && sessions && <span className="rounded-full bg-white/20 px-2.5 py-1">{sessions} séances</span>}
-            </div>
-          </div>
-          <div className="rounded-2xl border border-line bg-white p-4 text-sm shadow-card">
-            <div className="flex justify-between">
-              <span className="text-muted">Payé ({PAY_LABEL[method]})</span>
-              <b>{mad(Math.min(paidNum, total))}</b>
-            </div>
-            <div className={cn("mt-1 flex justify-between", total - paidNum > 0 ? "text-red-600" : "text-emerald-600")}>
-              <span>Reste à payer</span>
-              <b>{mad(Math.max(0, total - paidNum))}</b>
-            </div>
+              {plan?.kind === "pack" && sessions && (
+                <div className="flex justify-between gap-3">
+                  <dt className="text-muted">Séances</dt>
+                  <dd className="font-medium tabular-nums text-ink">{sessions}</dd>
+                </div>
+              )}
+              <div className="flex justify-between gap-3">
+                <dt className="text-muted">Payé ({PAY_LABEL[method]})</dt>
+                <dd className="font-medium tabular-nums text-ink">{mad(Math.min(paidNum, total))}</dd>
+              </div>
+              <div className={cn("flex justify-between gap-3", total - paidNum > 0 ? "text-red-600" : "text-emerald-700")}>
+                <dt>Reste à payer</dt>
+                <dd className="font-semibold tabular-nums">{mad(Math.max(0, total - paidNum))}</dd>
+              </div>
+            </dl>
           </div>
           <div className="flex flex-col gap-2">
-            <SubmitButton className="h-12 w-full rounded-2xl">
-              <Save className="size-4" /> Créer l&apos;abonnement
+            <SubmitButton className="h-10 w-full">
+              <Save /> Créer et encaisser
             </SubmitButton>
-            <a href={cancelHref} className="inline-flex h-11 items-center justify-center rounded-2xl text-sm font-semibold text-muted transition hover:bg-white hover:text-ink">
+            <a href={cancelHref} className={buttonClass("ghost", "w-full")}>
               Annuler
             </a>
           </div>

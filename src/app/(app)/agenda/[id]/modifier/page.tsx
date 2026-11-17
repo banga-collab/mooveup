@@ -2,8 +2,8 @@ import { notFound } from "next/navigation";
 import { getScope } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { isoToAgadir } from "@/lib/utils";
-import type { Appointment } from "@/lib/types";
-import { saveAppointment } from "@/actions/agenda";
+import { saveAppointmentPlus } from "@/actions/agenda-plus";
+import { REPEAT_LABEL, type AppointmentSeries, type SeriesAppointment } from "@/lib/types-agenda";
 import { PageHeader } from "@/components/ui";
 import { BackLink } from "@/components/back-link";
 import { AppointmentForm } from "@/components/agenda/appointment-form";
@@ -15,8 +15,13 @@ export default async function EditAppointmentPage({ params }: { params: Promise<
   const [{ id }, scope] = await Promise.all([params, getScope()]);
   const supabase = await createClient();
   const { data: row } = await supabase.from("appointments").select("*").eq("id", id).in("entity_id", scope.allowed.map((e) => e.id)).maybeSingle();
-  const appt = row as Appointment | null;
+  const appt = row as SeriesAppointment | null;
   if (!appt) notFound();
+  let series: AppointmentSeries | null = null;
+  if (appt.series_id) {
+    const { data } = await supabase.from("appointment_series").select("*").eq("id", appt.series_id).maybeSingle();
+    series = data as AppointmentSeries | null;
+  }
 
   const { date, time } = isoToAgadir(appt.starts_at);
   const data = await loadAppointmentFormData(scope, { extraContactId: appt.contact_id, aroundDate: date });
@@ -26,7 +31,7 @@ export default async function EditAppointmentPage({ params }: { params: Promise<
     <div>
       <PageHeader title="Modifier le rendez-vous" subtitle={appt.service} back={<BackLink href={back} label="Retour à l'agenda" />} />
       <AppointmentForm
-        action={saveAppointment}
+        action={saveAppointmentPlus}
         {...data}
         cancelHref={back}
         defaults={{
@@ -43,6 +48,8 @@ export default async function EditAppointmentPage({ params }: { params: Promise<
           room: appt.room ?? "",
           notes: appt.notes ?? "",
           status: appt.status,
+          series_id: appt.series_id ?? null,
+          series_label: series ? REPEAT_LABEL[series.freq].toLowerCase() : null,
         }}
       />
     </div>

@@ -1,6 +1,7 @@
 import { Banknote, CalendarRange, ConciergeBell, CreditCard, FileText, Landmark, Layers, Package, Smartphone, type LucideIcon } from "lucide-react";
 import type { CatalogKind, PayMethod, SaleStatus } from "@/lib/types";
-import { PAY_LABEL, SALE_STATUS_LABEL, cn } from "@/lib/utils";
+import { PAY_LABEL, SALE_STATUS_LABEL } from "@/lib/utils";
+import { Badge } from "@/components/ui";
 
 export const METHOD_ORDER: PayMethod[] = ["especes", "carte", "virement", "cheque", "en_ligne"];
 
@@ -21,19 +22,19 @@ export const KIND_META: Record<CatalogKind, { icon: LucideIcon; plural: string; 
   produit: { icon: Package, plural: "Produits", color: "#059669", soft: "#ecfdf5" },
 };
 
-const STATUS_CLS: Record<SaleStatus, string> = {
-  payee: "bg-emerald-50 text-emerald-700 ring-emerald-100",
-  partielle: "bg-amber-50 text-amber-700 ring-amber-100",
-  impayee: "bg-red-50 text-red-700 ring-red-100",
-  remboursee: "bg-slate-100 text-slate-600 ring-slate-200",
+const STATUS_TONE: Record<SaleStatus, "green" | "amber" | "red" | "gray"> = {
+  payee: "green",
+  partielle: "amber",
+  impayee: "red",
+  remboursee: "gray",
 };
 
-export function SaleStatusBadge({ status, className }: { status: SaleStatus; className?: string }) {
+/** Statut de vente (Badge sobre). `className` conservé pour compatibilité. */
+export function SaleStatusBadge({ status }: { status: SaleStatus; className?: string }) {
   return (
-    <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset", STATUS_CLS[status], className)}>
-      <span className="size-1.5 rounded-full bg-current" />
+    <Badge tone={STATUS_TONE[status]} dot>
       {SALE_STATUS_LABEL[status]}
-    </span>
+    </Badge>
   );
 }
 
@@ -41,10 +42,8 @@ export function MethodChip({ method }: { method: PayMethod }) {
   const m = METHOD_META[method];
   const I = m.icon;
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold text-slate-600" title={PAY_LABEL[method]}>
-      <span className="grid size-6 place-items-center rounded-lg" style={{ background: `${m.color}14`, color: m.color }}>
-        <I className="size-3.5" />
-      </span>
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs text-slate-600" title={PAY_LABEL[method]}>
+      <I className="size-3.5 text-slate-400" />
       {m.short}
     </span>
   );

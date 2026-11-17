@@ -11,46 +11,39 @@ export function EntityIcon({ id, ...props }: { id: string | null | undefined } &
   return <I {...props} />;
 }
 
-/** Pastille ronde colorée avec l'icône de l'établissement */
+/** Pastille discrète : fond teinté, icône à la couleur de l'établissement */
 export function EntityMark({ id, size = 36, className }: { id: string | null | undefined; size?: number; className?: string }) {
   const e = entity(id);
   return (
     <span
-      className={cn("grid shrink-0 place-items-center rounded-xl text-white shadow-sm", className)}
-      style={{ width: size, height: size, background: e ? `linear-gradient(135deg, ${e.color}, ${shade(e.color, -18)})` : "linear-gradient(135deg,#1a6d8e,#e8782a)" }}
+      className={cn("grid shrink-0 place-items-center rounded-lg", className)}
+      style={{ width: size, height: size, background: e ? e.soft : "#eef6f9", color: e ? e.color : "#1a6d8e" }}
     >
-      <EntityIcon id={id ?? null} style={{ width: size * 0.5, height: size * 0.5 }} strokeWidth={2.1} />
+      <EntityIcon id={id ?? null} style={{ width: size * 0.5, height: size * 0.5 }} strokeWidth={2} />
     </span>
   );
 }
 
-/** Badge texte de l'établissement, à sa couleur */
+/** Nom de l'établissement précédé d'un point de couleur */
 export function EntityBadge({ id, short = true, className }: { id: string | null | undefined; short?: boolean; className?: string }) {
   const e = entity(id);
   if (!e) return null;
   return (
-    <span
-      className={cn("inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset", className)}
-      style={{ background: e.soft, color: e.color, boxShadow: `inset 0 0 0 1px ${e.color}22` }}
-    >
-      <EntityIcon id={e.id} className="size-3" strokeWidth={2.4} />
+    <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium text-slate-600", className)}>
+      <span className="size-2 shrink-0 rounded-full" style={{ background: e.color }} />
       {short ? e.short : e.name}
     </span>
   );
 }
 
-/** Plusieurs établissements en petites pastilles */
+/** Plusieurs établissements en petits points */
 export function EntityDots({ ids }: { ids: string[] }) {
   return (
-    <span className="inline-flex -space-x-1.5">
+    <span className="inline-flex items-center gap-1">
       {ids.map((id) => {
         const e = entity(id);
         if (!e) return null;
-        return (
-          <span key={id} title={e.name} className="grid size-6 place-items-center rounded-full text-white ring-2 ring-white" style={{ background: e.color }}>
-            <EntityIcon id={id} className="size-3" strokeWidth={2.4} />
-          </span>
-        );
+        return <span key={id} title={e.name} className="size-2.5 rounded-full ring-2 ring-white" style={{ background: e.color }} />;
       })}
     </span>
   );

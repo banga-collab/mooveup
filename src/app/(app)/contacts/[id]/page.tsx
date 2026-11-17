@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
-  CalendarCheck,
   CalendarDays,
   CalendarPlus,
   ChevronRight,
-  CircleDollarSign,
-  Clock,
+  FileHeart,
+  Gift,
+  QrCode,
   CreditCard,
   Filter,
   History,
@@ -22,7 +22,6 @@ import {
 } from "lucide-react";
 import { getProfile, getScope } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import { entity } from "@/lib/entities";
 import { byId } from "@/lib/data";
 import {
   age,
@@ -40,14 +39,17 @@ import {
 } from "@/lib/utils";
 import type { Activity, Appointment, Contact, Lead, Profile, Sale, SaleItem, Subscription } from "@/lib/types";
 import { deleteContact } from "@/actions/contacts";
-import { Badge, Card, CardHeader, Empty, LinkButton } from "@/components/ui";
-import { EntityBadge, EntityMark, shade } from "@/components/entity-icon";
+import { Avatar, Badge, buttonClass, Card, CardHeader, Empty, LinkButton, Segmented } from "@/components/ui";
+import { EntityBadge } from "@/components/entity-icon";
 import { ConfirmButton } from "@/components/confirm-button";
 import { BackLink } from "@/components/back-link";
 import { StatusBadge, WhatsAppButton } from "@/components/contacts/bits";
 import { ActivityForm, Timeline } from "@/components/contacts/timeline";
 import { LeadCard } from "@/components/leads/lead-card";
 import { param } from "@/components/contacts/helpers";
+import { ContactDossier } from "@/components/ext/contact-dossier";
+import { ContactLoyalty } from "@/components/ext/contact-loyalty";
+import { ContactAccess } from "@/components/ext/contact-access";
 
 export const metadata = { title: "Fiche client" };
 
@@ -57,10 +59,13 @@ const TABS = [
   { id: "rdv", label: "Rendez-vous", icon: CalendarDays },
   { id: "achats", label: "Achats", icon: Receipt },
   { id: "prospects", label: "Prospects", icon: Filter },
+  { id: "dossier", label: "Dossier", icon: FileHeart },
+  { id: "fidelite", label: "Fidélité", icon: Gift },
+  { id: "carte", label: "Carte d'accès", icon: QrCode },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
-const SUB_TONE = { actif: "green", suspendu: "amber", expire: "gray", resilie: "red" } as const;
+const SUB_TONE = { actif: "green", suspendu: "amber", expire: "gray", resilie: "gray" } as const;
 const SALE_TONE = { payee: "green", partielle: "amber", impayee: "red", remboursee: "gray" } as const;
 const APPT_TONE = { prevu: "amber", confirme: "brand", arrive: "green", termine: "gray", absent: "red", annule: "gray" } as const;
 
@@ -93,7 +98,8 @@ export default async function ContactPage({ params, searchParams }: { params: Pr
   const people = byId(peopleRaw as Profile[]);
 
   const { data: itemsRaw } = sales.length ? await supabase.from("sale_items").select("*").in("sale_id", sales.map((s) => s.id)) : { data: [] };
-  const items = (itemsRaw ?? []) as SaleItem[];
+  const itemsBySale = new Map<string, SaleItem[]>();
+  for (const it of (itemsRaw ?? []) as SaleItem[]) itemsBySale.set(it.sale_id, [...(itemsBySale.get(it.sale_id) ?? []), it]);
 
   /* Indicateurs */
   const spent = sales.filter((s) => s.status !== "remboursee").reduce((a, s) => a + Number(s.total_mad), 0);
@@ -104,44 +110,29 @@ export default async function ContactPage({ params, searchParams }: { params: Pr
   const upcoming = appts.filter((a) => a.starts_at >= nowIso && a.status !== "annule").sort((a, b) => (a.starts_at < b.starts_at ? -1 : 1));
   const activeSubs = subs.filter((s) => s.status === "actif");
 
-  /* En-tête aux couleurs du premier établissement visible */
   const mine = contact.entity_ids.filter((e) => allowedIds.includes(e));
-  const main = entity(scope.current && mine.includes(scope.current.id) ? scope.current.id : mine[0]) ?? scope.allowed[0]!;
   const canDelete = me.role === "direction" || me.role === "manager";
   const years = age(contact.birth_date);
   const hiddenScope = scope.current && !contact.entity_ids.includes(scope.current.id);
   const formEntities = scope.allowed.filter((e) => mine.includes(e.id));
 
-  const counts: Record<TabId, number> = { historique: activities.length, abonnements: subs.length, rdv: appts.length, achats: sales.length, prospects: leads.length };
+  const counts: Partial<Record<TabId, number>> = { historique: activities.length, abonnements: subs.length, rdv: appts.length, achats: sales.length, prospects: leads.length };
 
   return (
     <div className="space-y-6">
       <BackLink href="/contacts" label="Clients & contacts" />
 
-      {/* En-tête coloré */}
-      <section
-        className="relative overflow-hidden rounded-3xl p-5 text-white shadow-xl animate-fade-up sm:p-7"
-        style={{ background: `linear-gradient(135deg, ${shade(main.color, -25)}, ${main.color} 55%, ${shade(main.color, 18)})` }}
-      >
-        <span className="pointer-events-none absolute -right-10 -top-10 size-56 rounded-full bg-white/10" />
-        <span className="pointer-events-none absolute -bottom-16 right-24 size-40 rounded-full bg-white/10" />
-        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+      {/* En-tête */}
+      <section className="rounded-xl border border-line bg-white p-5 sm:p-6">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex min-w-0 items-start gap-4">
-            <span className="grid size-16 shrink-0 place-items-center rounded-2xl bg-white/20 font-display text-2xl font-extrabold ring-2 ring-white/40 sm:size-20 sm:text-3xl">
-              {contact.full_name
-                .split(/\s+/)
-                .slice(0, 2)
-                .map((p) => p[0]?.toUpperCase())
-                .join("")}
-            </span>
+            <Avatar name={contact.full_name} size={56} />
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="min-w-0 break-words font-display text-2xl font-extrabold tracking-tight sm:text-3xl">{contact.full_name}</h1>
-                <span className="rounded-full bg-white px-0.5 py-0.5">
-                  <StatusBadge status={contact.status} />
-                </span>
+                <h1 className="min-w-0 break-words text-xl font-semibold tracking-tight sm:text-2xl">{contact.full_name}</h1>
+                <StatusBadge status={contact.status} />
               </div>
-              <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-white/85">
+              <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted">
                 {contact.sex && <span>{contact.sex === "F" ? "Femme" : "Homme"}</span>}
                 {years !== null && <span>{years} ans</span>}
                 {contact.city && (
@@ -156,47 +147,43 @@ export default async function ContactPage({ params, searchParams }: { params: Pr
                   </span>
                 )}
               </p>
-              <div className="mt-3 flex flex-wrap gap-1.5">
+              <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
                 {contact.entity_ids.map((e) => (
                   <EntityBadge key={e} id={e} />
                 ))}
+                {contact.tags.map((t) => (
+                  <Badge key={t} tone="gray">
+                    {t}
+                  </Badge>
+                ))}
               </div>
-              {contact.tags.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1">
-                  {contact.tags.map((t) => (
-                    <span key={t} className="rounded-md bg-white/20 px-1.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ring-white/30">
-                      {t}
-                    </span>
-                  ))}
-                </div>
-              )}
               <div className="mt-4 flex flex-wrap gap-2">
                 {contact.phone && (
-                  <a href={`tel:${contact.phone.replace(/\s/g, "")}`} className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-white/20 px-3 text-sm font-semibold ring-1 ring-white/30 transition hover:bg-white/30">
-                    <Phone className="size-4" /> {contact.phone}
+                  <a href={`tel:${contact.phone.replace(/\s/g, "")}`} className={buttonClass("secondary", "h-8")}>
+                    <Phone /> {contact.phone}
                   </a>
                 )}
-                {contact.whatsapp_optin && <WhatsAppButton phone={contact.phone} label="WhatsApp" text={`Bonjour ${contact.full_name.split(" ")[0]},`} className="h-9 px-3 text-sm" />}
+                {contact.whatsapp_optin && <WhatsAppButton phone={contact.phone} label="WhatsApp" text={`Bonjour ${contact.full_name.split(" ")[0]},`} className="h-8 px-3 text-[13px]" />}
                 {contact.email && (
-                  <a href={`mailto:${contact.email}`} className="inline-flex h-9 min-w-0 max-w-full items-center gap-1.5 rounded-xl bg-white/20 px-3 text-sm font-semibold ring-1 ring-white/30 transition hover:bg-white/30">
-                    <Mail className="size-4 shrink-0" /> <span className="truncate">{contact.email}</span>
+                  <a href={`mailto:${contact.email}`} className={buttonClass("secondary", "h-8 max-w-full")}>
+                    <Mail /> <span className="truncate">{contact.email}</span>
                   </a>
                 )}
               </div>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2 lg:max-w-[340px] lg:justify-end">
-            <Link href={`/agenda/nouveau?contact=${id}`} className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-white px-3.5 text-sm font-bold text-ink shadow-sm transition hover:-translate-y-0.5">
-              <CalendarPlus className="size-4" style={{ color: main.color }} /> Nouveau RDV
+          <div className="flex flex-wrap gap-2 lg:max-w-[360px] lg:justify-end">
+            <Link href={`/caisse?contact=${id}`} className={buttonClass("primary")}>
+              <ShoppingCart /> Encaisser
             </Link>
-            <Link href={`/caisse?contact=${id}`} className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-accent-500 px-3.5 text-sm font-bold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-accent-600">
-              <ShoppingCart className="size-4" /> Encaisser
+            <Link href={`/agenda/nouveau?contact=${id}`} className={buttonClass("secondary")}>
+              <CalendarPlus /> Rendez-vous
             </Link>
-            <Link href={`/abonnements/nouveau?contact=${id}`} className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-white/20 px-3.5 text-sm font-bold ring-1 ring-white/30 transition hover:bg-white/30">
-              <CreditCard className="size-4" /> Abonnement
+            <Link href={`/abonnements/nouveau?contact=${id}`} className={buttonClass("secondary")}>
+              <CreditCard /> Abonnement
             </Link>
-            <Link href={`/contacts/${id}/modifier`} className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-white/20 px-3.5 text-sm font-bold ring-1 ring-white/30 transition hover:bg-white/30">
-              <Pencil className="size-4" /> Modifier
+            <Link href={`/contacts/${id}/modifier`} className={buttonClass("ghost")}>
+              <Pencil /> Modifier
             </Link>
             {canDelete && (
               <form action={deleteContact.bind(null, id)}>
@@ -206,9 +193,9 @@ export default async function ContactPage({ params, searchParams }: { params: Pr
                       ? `${contact.full_name} fréquente aussi d'autres établissements : la fiche sera seulement retirée des vôtres. Continuer ?`
                       : `Supprimer définitivement ${contact.full_name} et tout son historique ? Cette action est irréversible.`
                   }
-                  className="h-10 rounded-xl px-3"
+                  className="h-9 px-3"
                 >
-                  <Trash2 className="size-4" /> <span className="sr-only sm:not-sr-only">Supprimer</span>
+                  <Trash2 className="size-4" /> <span className="sr-only">Supprimer</span>
                 </ConfirmButton>
               </form>
             )}
@@ -217,92 +204,82 @@ export default async function ContactPage({ params, searchParams }: { params: Pr
       </section>
 
       {hiddenScope && (
-        <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800">
           Ce contact ne fréquente pas {scope.current!.short} : seules les données de cet établissement sont affichées. Choisissez « Tous » dans le sélecteur pour voir tout son historique.
         </p>
       )}
 
       {/* Indicateurs */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 [&>*]:min-w-0">
-        <Indicator icon={<CircleDollarSign className="size-5" />} color="#e8782a" label="Total dépensé" value={mad(spent)} sub={due > 0 ? `Reste dû : ${mad(due)}` : `${sales.length} achat${sales.length > 1 ? "s" : ""}`} alert={due > 0} />
-        <Indicator icon={<CalendarCheck className="size-5" />} color="#1a6d8e" label="Visites & RDV" value={String(honoured + visits)} sub={upcoming.length ? `Prochain : ${fmtDate(upcoming[0]!.starts_at, { day: "numeric", month: "short" })} à ${fmtTime(upcoming[0]!.starts_at)}` : "Aucun RDV à venir"} />
-        <Indicator icon={<CreditCard className="size-5" />} color="#059669" label="Abonnements actifs" value={String(activeSubs.length)} sub={activeSubs[0] ? `${activeSubs[0].name} · fin ${fmtDate(activeSubs[0].end_date, { day: "numeric", month: "short" })}` : "Aucun en cours"} />
-        <Indicator icon={<Clock className="size-5" />} color="#7c4dcc" label="Client depuis" value={fmtDate(contact.created_at, { month: "short", year: "numeric" })} sub={relative(contact.created_at)} />
+        <Indicator label="Total dépensé" value={mad(spent)} sub={due > 0 ? `Reste dû : ${mad(due)}` : `${sales.length} achat${sales.length > 1 ? "s" : ""}`} alert={due > 0} href={`/contacts/${id}?tab=achats`} />
+        <Indicator label="Visites & RDV" value={String(honoured + visits)} sub={upcoming.length ? `Prochain : ${fmtDate(upcoming[0]!.starts_at, { day: "numeric", month: "short" })} à ${fmtTime(upcoming[0]!.starts_at)}` : "Aucun RDV à venir"} href={`/contacts/${id}?tab=rdv`} />
+        <Indicator label="Abonnements actifs" value={String(activeSubs.length)} sub={activeSubs[0] ? `${activeSubs[0].name} · fin ${fmtDate(activeSubs[0].end_date, { day: "numeric", month: "short" })}` : "Aucun en cours"} href={`/contacts/${id}?tab=abonnements`} />
+        <Indicator label="Client depuis" value={fmtDate(contact.created_at, { month: "short", year: "numeric" })} sub={relative(contact.created_at)} />
       </div>
 
       {/* Onglets */}
-      <div className="overflow-x-auto">
-        <nav className="flex w-max gap-1 rounded-2xl border border-line bg-white p-1 shadow-card">
-          {TABS.map((t) => {
-            const Icon = t.icon;
-            const on = t.id === tab;
-            return (
-              <Link
-                key={t.id}
-                href={`/contacts/${id}?tab=${t.id}`}
-                scroll={false}
-                className={cn("inline-flex h-10 items-center gap-1.5 rounded-xl px-3 text-sm font-semibold transition", on ? "bg-brand-500 text-white shadow-sm shadow-brand-500/25" : "text-slate-600 hover:bg-canvas")}
-              >
-                <Icon className="size-4" /> {t.label}
-                <span className={cn("rounded-full px-1.5 text-[11px] font-bold", on ? "bg-white/25" : "bg-canvas text-muted")}>{counts[t.id]}</span>
-              </Link>
-            );
-          })}
-        </nav>
-      </div>
+      <Segmented active={tab} items={TABS.map((t) => ({ id: t.id, href: `/contacts/${id}?tab=${t.id}`, label: t.label, count: counts[t.id] }))} />
 
       {tab === "historique" && (
         <div className="grid gap-6 lg:grid-cols-[1fr_1.4fr] [&>*]:min-w-0">
           <div className="space-y-6">
             <Card>
-              <CardHeader title="Ajouter un échange" subtitle="Note, appel, message ou visite" icon={<Plus className="size-4" />} />
+              <CardHeader title="Ajouter un échange" subtitle="Note, appel, message ou visite" />
               <div className="px-5 pb-5">
                 <ActivityForm contactId={id} entities={formEntities} defaultEntity={scope.current && mine.includes(scope.current.id) ? scope.current.id : null} />
               </div>
             </Card>
             {contact.notes && (
-              <Card className="p-5">
-                <p className="text-xs font-bold uppercase tracking-wider text-brand-600">Notes internes</p>
-                <p className="mt-2 whitespace-pre-line text-sm text-ink">{contact.notes}</p>
+              <Card>
+                <CardHeader title="Notes internes" />
+                <p className="whitespace-pre-line px-5 pb-5 text-sm text-slate-700">{contact.notes}</p>
               </Card>
             )}
           </div>
-          <Card className="p-5">
-            <Timeline items={activities} people={people} />
+          <Card>
+            <CardHeader title="Historique" subtitle={`${activities.length} événement${activities.length > 1 ? "s" : ""}`} />
+            <div className="px-5 pb-5">
+              <Timeline items={activities} people={people} />
+            </div>
           </Card>
         </div>
       )}
 
       {tab === "abonnements" && (
-        <Card>
+        <Card className="overflow-hidden">
           <CardHeader
             title="Abonnements et packs"
-            subtitle={`${activeSubs.length} actif${activeSubs.length > 1 ? "s" : ""}`}
-            icon={<CreditCard className="size-4" />}
+            subtitle={`${activeSubs.length} actif${activeSubs.length > 1 ? "s" : ""} sur ${subs.length}`}
             action={
-              <LinkButton href={`/abonnements/nouveau?contact=${id}`} className="h-9">
-                <Plus className="size-4" /> Nouveau
+              <LinkButton href={`/abonnements/nouveau?contact=${id}`} variant="secondary">
+                <Plus /> Abonnement
               </LinkButton>
             }
           />
           {subs.length ? (
-            <ul className="divide-y divide-line px-2 pb-3">
+            <ul className="divide-y divide-line border-t border-line">
               {subs.map((s) => {
                 const d = daysUntil(s.end_date);
                 return (
-                  <li key={s.id} className="flex flex-wrap items-center gap-3 px-3 py-3">
-                    <EntityMark id={s.entity_id} size={38} />
+                  <li key={s.id} className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-5 py-3">
                     <div className="min-w-0 flex-1">
-                      <p className="truncate font-semibold">{s.name}</p>
-                      <p className="text-xs text-muted">
-                        Du {fmtDate(s.start_date)} au {fmtDate(s.end_date)}
-                        {s.sessions_left !== null && ` · ${s.sessions_left} séance${s.sessions_left > 1 ? "s" : ""} restante${s.sessions_left > 1 ? "s" : ""}`}
-                        {s.auto_renew && " · renouvellement auto"}
+                      <p className="truncate text-sm font-medium text-ink">{s.name}</p>
+                      <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted">
+                        <EntityBadge id={s.entity_id} />
+                        <span>
+                          {fmtDate(s.start_date, { day: "numeric", month: "short" })} → {fmtDate(s.end_date)}
+                        </span>
+                        {s.sessions_left !== null && (
+                          <span className="tabular-nums">
+                            {s.sessions_left} séance{s.sessions_left > 1 ? "s" : ""} restante{s.sessions_left > 1 ? "s" : ""}
+                          </span>
+                        )}
+                        {s.auto_renew && <span>Renouvellement auto</span>}
                       </p>
                     </div>
-                    <span className="font-display text-sm font-extrabold">{mad(s.price_mad)}</span>
+                    <span className="text-sm font-semibold tabular-nums">{mad(s.price_mad)}</span>
                     <span className="flex items-center gap-1.5">
-                      {s.status === "actif" && d >= 0 && d <= 7 && <Badge tone="red">{d === 0 ? "Fin aujourd'hui" : `Fin dans ${d} j`}</Badge>}
+                      {s.status === "actif" && d >= 0 && d <= 7 && <Badge tone="amber">{d === 0 ? "Fin aujourd'hui" : `Fin dans ${d} j`}</Badge>}
                       <Badge tone={SUB_TONE[s.status]} dot>
                         {SUB_STATUS_LABEL[s.status]}
                       </Badge>
@@ -312,95 +289,125 @@ export default async function ContactPage({ params, searchParams }: { params: Pr
               })}
             </ul>
           ) : (
-            <Empty icon={<CreditCard className="size-6" />} title="Aucun abonnement" text="Créez un abonnement ou un pack de séances pour ce client." />
+            <Empty
+              icon={<CreditCard />}
+              title="Aucun abonnement"
+              text="Créez un abonnement ou un pack de séances pour ce client."
+              action={
+                <LinkButton href={`/abonnements/nouveau?contact=${id}`} variant="brand">
+                  <Plus /> Créer un abonnement
+                </LinkButton>
+              }
+            />
           )}
         </Card>
       )}
 
       {tab === "rdv" && (
-        <Card>
+        <Card className="overflow-hidden">
           <CardHeader
             title="Rendez-vous"
             subtitle={`${upcoming.length} à venir · ${honoured} honorés`}
-            icon={<CalendarDays className="size-4" />}
             action={
-              <LinkButton href={`/agenda/nouveau?contact=${id}`} variant="brand" className="h-9">
-                <CalendarPlus className="size-4" /> Nouveau
+              <LinkButton href={`/agenda/nouveau?contact=${id}`} variant="secondary">
+                <CalendarPlus /> Rendez-vous
               </LinkButton>
             }
           />
           {appts.length ? (
-            <ul className="divide-y divide-line px-2 pb-3">
+            <ul className="divide-y divide-line border-t border-line">
               {appts.map((a) => {
                 const future = a.starts_at >= nowIso;
+                const staff = a.staff_id ? people.get(a.staff_id) : undefined;
                 return (
-                  <li key={a.id} className={cn("flex items-center gap-3 px-3 py-3", !future && (a.status === "annule" || a.status === "absent") && "opacity-60")}>
-                    <span className={cn("w-14 shrink-0 rounded-xl py-1.5 text-center", future ? "bg-accent-50 text-accent-700" : "bg-canvas text-slate-600")}>
-                      <span className="block font-display text-sm font-extrabold">{fmtDate(a.starts_at, { day: "numeric" })}</span>
-                      <span className="block text-[10.5px] font-semibold uppercase">{fmtDate(a.starts_at, { month: "short" }).replace(".", "")}</span>
+                  <li key={a.id} className={cn("flex items-center gap-4 px-5 py-3", !future && (a.status === "annule" || a.status === "absent") && "opacity-60")}>
+                    <span className="w-12 shrink-0 text-center">
+                      <span className={cn("block text-base font-semibold leading-tight tabular-nums", future ? "text-brand-600" : "text-ink")}>{fmtDate(a.starts_at, { day: "numeric" })}</span>
+                      <span className="block text-[11px] uppercase text-muted">{fmtDate(a.starts_at, { month: "short" }).replace(".", "")}</span>
                     </span>
-                    <EntityMark id={a.entity_id} size={34} className="hidden sm:grid" />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate font-semibold">{a.service}</p>
-                      <p className="truncate text-xs text-muted">
-                        {fmtTime(a.starts_at)} · {a.duration_min} min
-                        {a.staff_id && people.get(a.staff_id) ? ` · ${people.get(a.staff_id)!.full_name}` : ""}
-                        {a.room ? ` · ${a.room}` : ""}
+                      <p className="truncate text-sm font-medium text-ink">{a.service}</p>
+                      <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-muted">
+                        <EntityBadge id={a.entity_id} />
+                        <span className="tabular-nums">
+                          {fmtTime(a.starts_at)} · {a.duration_min} min
+                        </span>
+                        {staff && <span>{staff.full_name}</span>}
+                        {a.room && <span>{a.room}</span>}
                       </p>
                     </div>
-                    <span className="hidden font-display text-sm font-bold text-slate-600 sm:block">{mad(a.price_mad)}</span>
+                    <span className="hidden text-sm tabular-nums text-slate-600 sm:block">{mad(a.price_mad)}</span>
                     <Badge tone={APPT_TONE[a.status]}>{APPT_STATUS_LABEL[a.status]}</Badge>
                   </li>
                 );
               })}
             </ul>
           ) : (
-            <Empty icon={<CalendarDays className="size-6" />} title="Aucun rendez-vous" text="Les rendez-vous pris pour ce client apparaîtront ici." />
+            <Empty
+              icon={<CalendarDays />}
+              title="Aucun rendez-vous"
+              text="Les rendez-vous pris pour ce client apparaîtront ici."
+              action={
+                <LinkButton href={`/agenda/nouveau?contact=${id}`} variant="brand">
+                  <CalendarPlus /> Prendre rendez-vous
+                </LinkButton>
+              }
+            />
           )}
         </Card>
       )}
 
       {tab === "achats" && (
-        <Card>
+        <Card className="overflow-hidden">
           <CardHeader
             title="Achats"
-            subtitle={`${mad(spent)} au total`}
-            icon={<Receipt className="size-4" />}
+            subtitle={`${mad(spent)} au total${due > 0 ? ` · ${mad(due)} restant dû` : ""}`}
             action={
-              <LinkButton href={`/caisse?contact=${id}`} className="h-9">
-                <ShoppingCart className="size-4" /> Encaisser
+              <LinkButton href={`/caisse?contact=${id}`} variant="secondary">
+                <ShoppingCart /> Encaisser
               </LinkButton>
             }
           />
           {sales.length ? (
-            <ul className="divide-y divide-line px-2 pb-3">
+            <ul className="divide-y divide-line border-t border-line">
               {sales.map((s) => {
-                const lines = items.filter((i) => i.sale_id === s.id);
+                const lines = itemsBySale.get(s.id) ?? [];
                 return (
                   <li key={s.id}>
-                    <Link href={`/ventes/${s.id}`} className="group flex items-start gap-3 rounded-xl px-3 py-3 transition hover:bg-canvas">
-                      <EntityMark id={s.entity_id} size={36} />
+                    <Link href={`/ventes/${s.id}`} className="group flex items-center gap-4 px-5 py-3 transition hover:bg-slate-50/70 focus-visible:bg-slate-50 focus-visible:outline-none">
                       <div className="min-w-0 flex-1">
                         <p className="flex flex-wrap items-center gap-x-2 text-sm">
-                          <span className="font-semibold">N° {s.number}</span>
+                          <span className="font-medium text-ink group-hover:text-brand-600">N° {s.number}</span>
                           <span className="text-xs text-muted">
                             {fmtDate(s.sold_at)} · {PAY_LABEL[s.method]}
                           </span>
                         </p>
-                        <p className="mt-0.5 truncate text-xs text-slate-600">{lines.length ? lines.map((l) => `${l.qty > 1 ? `${l.qty} × ` : ""}${l.label}`).join(", ") : "Détail indisponible"}</p>
+                        <p className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-muted">
+                          <EntityBadge id={s.entity_id} />
+                          <span className="truncate">{lines.length ? lines.map((l) => `${l.qty > 1 ? `${l.qty} × ` : ""}${l.label}`).join(", ") : "Détail indisponible"}</span>
+                        </p>
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-1">
-                        <span className="font-display text-sm font-extrabold">{mad(s.total_mad)}</span>
-                        <Badge tone={SALE_TONE[s.status]}>{SALE_STATUS_LABEL[s.status]}</Badge>
+                        <span className="text-sm font-semibold tabular-nums">{mad(s.total_mad)}</span>
+                        {s.status !== "payee" && <Badge tone={SALE_TONE[s.status]}>{SALE_STATUS_LABEL[s.status]}</Badge>}
                       </div>
-                      <ChevronRight className="mt-2 hidden size-4 shrink-0 text-slate-300 group-hover:text-brand-500 sm:block" />
+                      <ChevronRight className="hidden size-4 shrink-0 text-slate-300 group-hover:text-slate-500 sm:block" />
                     </Link>
                   </li>
                 );
               })}
             </ul>
           ) : (
-            <Empty icon={<Receipt className="size-6" />} title="Aucun achat" text="Les ventes encaissées pour ce client apparaîtront ici." />
+            <Empty
+              icon={<Receipt />}
+              title="Aucun achat"
+              text="Les ventes encaissées pour ce client apparaîtront ici."
+              action={
+                <LinkButton href={`/caisse?contact=${id}`}>
+                  <ShoppingCart /> Encaisser
+                </LinkButton>
+              }
+            />
           )}
         </Card>
       )}
@@ -408,9 +415,9 @@ export default async function ContactPage({ params, searchParams }: { params: Pr
       {tab === "prospects" && (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm text-muted">Opportunités ouvertes ou clôturées pour ce contact.</p>
-            <LinkButton href={`/prospects/nouveau?contact=${id}`}>
-              <Plus className="size-4" /> Nouveau prospect
+            <p className="text-[13px] text-muted">Opportunités ouvertes ou clôturées pour ce contact.</p>
+            <LinkButton href={`/prospects/nouveau?contact=${id}`} variant="secondary">
+              <Plus /> Prospect
             </LinkButton>
           </div>
           {leads.length ? (
@@ -421,26 +428,43 @@ export default async function ContactPage({ params, searchParams }: { params: Pr
             </div>
           ) : (
             <Card>
-              <Empty icon={<Filter className="size-6" />} title="Aucun prospect" text="Créez une opportunité (essai, offre…) pour suivre ce contact dans le pipeline." />
+              <Empty
+                icon={<Filter />}
+                title="Aucun prospect"
+                text="Créez une opportunité (essai, offre…) pour suivre ce contact dans le pipeline."
+                action={
+                  <LinkButton href={`/prospects/nouveau?contact=${id}`} variant="brand">
+                    <Plus /> Nouveau prospect
+                  </LinkButton>
+                }
+              />
             </Card>
           )}
         </div>
       )}
 
+
+      {tab === "dossier" && <ContactDossier contact={contact} scope={scope} me={me} />}
+      {tab === "fidelite" && <ContactLoyalty contact={contact} scope={scope} me={me} />}
+      {tab === "carte" && <ContactAccess contact={contact} scope={scope} me={me} />}
     </div>
   );
 }
 
-function Indicator({ icon, color, label, value, sub, alert }: { icon: React.ReactNode; color: string; label: string; value: string; sub: string; alert?: boolean }) {
-  return (
-    <div className="relative overflow-hidden rounded-3xl border border-line bg-white p-4 shadow-card">
-      <span className="absolute inset-x-0 top-0 h-1" style={{ background: color }} />
-      <span className="grid size-10 place-items-center rounded-xl text-white shadow-sm" style={{ background: color }}>
-        {icon}
-      </span>
-      <p className="mt-3 truncate font-display text-xl font-extrabold tracking-tight sm:text-2xl">{value}</p>
-      <p className="text-[13px] font-semibold text-slate-600">{label}</p>
-      <p className={cn("mt-0.5 truncate text-xs", alert ? "font-semibold text-red-600" : "text-muted")}>{sub}</p>
-    </div>
+function Indicator({ label, value, sub, alert, href }: { label: string; value: string; sub: string; alert?: boolean; href?: string }) {
+  const body = (
+    <>
+      <p className="truncate text-[13px] text-muted">{label}</p>
+      <p className="mt-1.5 truncate text-xl font-semibold tracking-tight tabular-nums text-ink">{value}</p>
+      <p className={cn("mt-1 truncate text-xs", alert ? "font-medium text-red-600" : "text-muted")}>{sub}</p>
+    </>
+  );
+  const cls = "block min-w-0 rounded-xl border border-line bg-white p-4";
+  return href ? (
+    <Link href={href} scroll={false} className={cn(cls, "transition hover:border-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40")}>
+      {body}
+    </Link>
+  ) : (
+    <div className={cls}>{body}</div>
   );
 }

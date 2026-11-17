@@ -4,23 +4,25 @@ import { cookies, headers } from "next/headers";
 import { DEMO, DEMO_ACCOUNTS } from "@/lib/demo";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { getLang, t, type Lang } from "@/lib/i18n";
 
 export type AuthState = { error?: string; success?: string } | undefined;
 
-function translate(msg: string) {
-  if (/invalid login credentials/i.test(msg)) return "E-mail ou mot de passe incorrect.";
-  if (/email not confirmed/i.test(msg)) return "Confirme d'abord ton e-mail (vérifie ta boîte de réception).";
-  if (/already registered/i.test(msg)) return "Un compte existe déjà avec cet e-mail.";
-  if (/password should be at least/i.test(msg)) return "Le mot de passe doit contenir au moins 8 caractères.";
-  if (/rate limit/i.test(msg)) return "Trop de tentatives. Réessaie dans quelques minutes.";
+function translate(lang: Lang, msg: string) {
+  if (/invalid login credentials/i.test(msg)) return t(lang, "auth.err.invalid");
+  if (/email not confirmed/i.test(msg)) return t(lang, "auth.err.confirm");
+  if (/already registered/i.test(msg)) return t(lang, "auth.err.exists");
+  if (/password should be at least/i.test(msg)) return t(lang, "auth.err.short");
+  if (/rate limit/i.test(msg)) return t(lang, "auth.err.rate");
   return msg;
 }
 
 export async function signIn(_: AuthState, formData: FormData): Promise<AuthState> {
+  const lang = await getLang();
   if (DEMO) {
     const email = String(formData.get("email") ?? "").trim().toLowerCase();
     const acc = DEMO_ACCOUNTS.find((a) => a.email === email && a.password === String(formData.get("password") ?? ""));
-    if (!acc) return { error: "E-mail ou mot de passe incorrect." };
+    if (!acc) return { error: t(lang, "auth.err.invalid") };
     (await cookies()).set("demo_user", acc.userId, { path: "/", httpOnly: true, sameSite: "lax" });
     redirect("/");
   }
@@ -29,14 +31,15 @@ export async function signIn(_: AuthState, formData: FormData): Promise<AuthStat
     email: String(formData.get("email") ?? "").trim(),
     password: String(formData.get("password") ?? ""),
   });
-  if (error) return { error: translate(error.message) };
+  if (error) return { error: translate(lang, error.message) };
   redirect("/");
 }
 
 export async function signUp(_: AuthState, formData: FormData): Promise<AuthState> {
-  if (DEMO) return { error: "Création de compte désactivée en mode démo : utilise un des comptes de démonstration." };
+  const lang = await getLang();
+  if (DEMO) return { error: t(lang, "auth.err.demo") };
   const password = String(formData.get("password") ?? "");
-  if (password.length < 8) return { error: "Le mot de passe doit contenir au moins 8 caractères." };
+  if (password.length < 8) return { error: t(lang, "auth.err.short") };
   const h = await headers();
   const origin = h.get("origin") ?? `https://${h.get("host")}`;
   const supabase = await createClient();
@@ -48,9 +51,9 @@ export async function signUp(_: AuthState, formData: FormData): Promise<AuthStat
       emailRedirectTo: `${origin}/auth/callback`,
     },
   });
-  if (error) return { error: translate(error.message) };
+  if (error) return { error: translate(lang, error.message) };
   if (data.session) redirect("/");
-  return { success: "Compte créé ! Un e-mail de confirmation vient de t'être envoyé. Clique sur le lien pour activer ton compte." };
+  return { success: t(lang, "auth.created") };
 }
 
 export async function signOut() {

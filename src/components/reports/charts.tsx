@@ -17,30 +17,47 @@ import {
 } from "recharts";
 import { mad, madShort } from "@/lib/utils";
 
-const AXIS = { fontSize: 11, fill: "#66727e" };
-const GRID = "#eef1f4";
+/* Palette sobre : bleu Moov'Up, gris ; les couleurs d'établissement sont atténuées */
+export const CHART_BLUE = "#1a6d8e";
+export const CHART_MUTED = "#cbd5e1";
+const ENTITY_OPACITY = 0.78;
+
+const AXIS = { fontSize: 11, fill: "#6b7280" };
+const GRID = "#f0f2f5";
 const TIP = {
-  contentStyle: { borderRadius: 12, border: "1px solid #e5e9ee", boxShadow: "0 10px 30px -10px rgb(16 24 40 / .18)", fontSize: 12, padding: "8px 12px" },
-  labelStyle: { fontWeight: 700, color: "#16212b", marginBottom: 4, textTransform: "capitalize" as const },
-  cursor: { fill: "rgba(26,109,142,.06)" },
+  contentStyle: { borderRadius: 8, border: "1px solid #e8ebef", boxShadow: "0 4px 12px -4px rgb(16 24 40 / .12)", fontSize: 12, padding: "8px 10px" },
+  labelStyle: { fontWeight: 600, color: "#111827", marginBottom: 4, textTransform: "capitalize" as const },
+  itemStyle: { padding: 0 },
+  cursor: { fill: "rgba(15,23,42,.04)" },
 };
+const LEGEND = { iconType: "circle" as const, iconSize: 7, wrapperStyle: { fontSize: 12, color: "#475569", paddingTop: 8 } };
 
 const money = (v: unknown) => mad(Number(v));
 
 export type Slice = { name: string; value: number; color: string };
 
-/** CA mensuel empilé par établissement */
+/** CA mensuel empilé par établissement (couleurs atténuées) */
 export function StackedRevenue({ data, series }: { data: Record<string, string | number>[]; series: { key: string; name: string; color: string }[] }) {
+  const single = series.length === 1;
   return (
-    <ResponsiveContainer width="100%" height={300}>
+    <ResponsiveContainer width="100%" height={280}>
       <BarChart data={data} margin={{ top: 8, right: 4, left: -8, bottom: 0 }}>
         <CartesianGrid vertical={false} stroke={GRID} />
         <XAxis dataKey="label" tick={AXIS} tickLine={false} axisLine={false} style={{ textTransform: "capitalize" }} />
         <YAxis tick={AXIS} tickLine={false} axisLine={false} width={48} tickFormatter={(v) => madShort(Number(v))} />
         <Tooltip {...TIP} formatter={(v, n) => [money(v), n]} />
-        {series.length > 1 && <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />}
+        {!single && <Legend {...LEGEND} />}
         {series.map((s, i) => (
-          <Bar key={s.key} dataKey={s.key} name={s.name} stackId="ca" fill={s.color} radius={i === series.length - 1 ? [6, 6, 0, 0] : [0, 0, 0, 0]} maxBarSize={44} />
+          <Bar
+            key={s.key}
+            dataKey={s.key}
+            name={s.name}
+            stackId="ca"
+            fill={single ? CHART_BLUE : s.color}
+            fillOpacity={single ? 1 : ENTITY_OPACITY}
+            radius={i === series.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]}
+            maxBarSize={36}
+          />
         ))}
       </BarChart>
     </ResponsiveContainer>
@@ -48,51 +65,52 @@ export function StackedRevenue({ data, series }: { data: Record<string, string |
 }
 
 /** Barres simples (une couleur) */
-export function MonthBars({ data, color, height = 240 }: { data: { label: string; value: number }[]; color: string; height?: number }) {
+export function MonthBars({ data, color = CHART_BLUE, height = 240 }: { data: { label: string; value: number }[]; color?: string; height?: number }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
       <BarChart data={data} margin={{ top: 8, right: 4, left: -8, bottom: 0 }}>
         <CartesianGrid vertical={false} stroke={GRID} />
-        <XAxis dataKey="label" tick={AXIS} tickLine={false} axisLine={false} />
+        <XAxis dataKey="label" tick={AXIS} tickLine={false} axisLine={false} style={{ textTransform: "capitalize" }} />
         <YAxis tick={AXIS} tickLine={false} axisLine={false} width={48} tickFormatter={(v) => madShort(Number(v))} />
         <Tooltip {...TIP} formatter={(v) => [money(v), "CA"]} />
-        <Bar dataKey="value" fill={color} radius={[8, 8, 0, 0]} maxBarSize={48} />
+        <Bar dataKey="value" fill={color} radius={[3, 3, 0, 0]} maxBarSize={36} />
       </BarChart>
     </ResponsiveContainer>
   );
 }
 
-/** Anneau avec total au centre et légende */
-export function Donut({ data, isMoney = true, centerLabel }: { data: Slice[]; isMoney?: boolean; centerLabel: string }) {
+/** Anneau avec total au centre et légende chiffrée */
+export function Donut({ data, isMoney = true, centerLabel, muted = false }: { data: Slice[]; isMoney?: boolean; centerLabel: string; muted?: boolean }) {
   const total = data.reduce((a, d) => a + d.value, 0);
   const fmt = (v: number) => (isMoney ? mad(v) : String(v));
+  const op = muted ? ENTITY_OPACITY : 1;
   return (
-    <div className="flex flex-col items-center gap-4 sm:flex-row">
-      <div className="relative h-[200px] w-[200px] shrink-0">
+    <div className="flex flex-col items-center gap-5 sm:flex-row">
+      <div className="relative h-[176px] w-[176px] shrink-0">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
             <Tooltip {...TIP} formatter={(v, n) => [fmt(Number(v)), n]} />
-            <Pie data={data} dataKey="value" nameKey="name" innerRadius={62} outerRadius={92} paddingAngle={2} stroke="#fff" strokeWidth={2}>
+            <Pie data={data} dataKey="value" nameKey="name" innerRadius={60} outerRadius={84} paddingAngle={1.5} stroke="#fff" strokeWidth={2}>
               {data.map((d) => (
-                <Cell key={d.name} fill={d.color} />
+                <Cell key={d.name} fill={d.color} fillOpacity={op} />
               ))}
             </Pie>
           </PieChart>
         </ResponsiveContainer>
         <div className="pointer-events-none absolute inset-0 grid place-items-center text-center">
           <div>
-            <p className="font-display text-lg font-extrabold text-ink">{isMoney ? madShort(total) : total}</p>
-            <p className="text-[11px] font-medium text-muted">{centerLabel}</p>
+            <p className="text-base font-semibold tabular-nums text-ink">{isMoney ? madShort(total) : total}</p>
+            <p className="text-xs text-muted">{centerLabel}</p>
           </div>
         </div>
       </div>
-      <ul className="w-full min-w-0 space-y-2">
+      <ul className="w-full min-w-0 divide-y divide-line">
         {data.map((d) => (
-          <li key={d.name} className="flex items-center gap-2 text-sm">
-            <span className="size-2.5 shrink-0 rounded-sm" style={{ background: d.color }} />
+          <li key={d.name} className="flex items-center gap-2 py-1.5 text-[13px]">
+            <span className="size-2 shrink-0 rounded-full" style={{ background: d.color, opacity: op }} />
             <span className="min-w-0 flex-1 truncate text-slate-700">{d.name}</span>
-            <span className="shrink-0 text-xs font-semibold text-muted">{total ? Math.round((d.value / total) * 100) : 0} %</span>
-            <span className="w-24 shrink-0 text-right font-display text-[13px] font-bold">{fmt(d.value)}</span>
+            <span className="w-10 shrink-0 text-right text-xs tabular-nums text-muted">{total ? Math.round((d.value / total) * 100) : 0} %</span>
+            <span className="w-24 shrink-0 text-right font-medium tabular-nums text-ink">{fmt(d.value)}</span>
           </li>
         ))}
       </ul>
@@ -100,22 +118,16 @@ export function Donut({ data, isMoney = true, centerLabel }: { data: Slice[]; is
   );
 }
 
-/** Nouveaux contacts par mois */
-export function AreaTrend({ data, color, name }: { data: { label: string; value: number }[]; color: string; name: string }) {
+/** Évolution mensuelle (ligne + aplat léger) */
+export function AreaTrend({ data, color = CHART_BLUE, name }: { data: { label: string; value: number }[]; color?: string; name: string }) {
   return (
-    <ResponsiveContainer width="100%" height={240}>
+    <ResponsiveContainer width="100%" height={220}>
       <AreaChart data={data} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
-        <defs>
-          <linearGradient id="area-fill" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity={0.3} />
-            <stop offset="100%" stopColor={color} stopOpacity={0} />
-          </linearGradient>
-        </defs>
         <CartesianGrid vertical={false} stroke={GRID} />
-        <XAxis dataKey="label" tick={AXIS} tickLine={false} axisLine={false} />
+        <XAxis dataKey="label" tick={AXIS} tickLine={false} axisLine={false} style={{ textTransform: "capitalize" }} />
         <YAxis tick={AXIS} tickLine={false} axisLine={false} allowDecimals={false} width={40} />
         <Tooltip {...TIP} formatter={(v) => [String(v), name]} />
-        <Area type="monotone" dataKey="value" stroke={color} strokeWidth={2.5} fill="url(#area-fill)" dot={{ r: 3, fill: "#fff", stroke: color, strokeWidth: 2 }} activeDot={{ r: 5 }} />
+        <Area type="monotone" dataKey="value" stroke={color} strokeWidth={1.75} fill={color} fillOpacity={0.06} dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />
       </AreaChart>
     </ResponsiveContainer>
   );
@@ -124,7 +136,7 @@ export function AreaTrend({ data, color, name }: { data: { label: string; value:
 /** Prospects gagnés / perdus par source */
 export function ConversionBars({ data }: { data: { source: string; gagnes: number; perdus: number; taux: number }[] }) {
   return (
-    <ResponsiveContainer width="100%" height={Math.max(220, data.length * 38 + 40)}>
+    <ResponsiveContainer width="100%" height={Math.max(200, data.length * 34 + 40)}>
       <BarChart data={data} layout="vertical" margin={{ top: 0, right: 12, left: 0, bottom: 0 }}>
         <CartesianGrid horizontal={false} stroke={GRID} />
         <XAxis type="number" tick={AXIS} tickLine={false} axisLine={false} allowDecimals={false} />
@@ -136,22 +148,29 @@ export function ConversionBars({ data }: { data: { source: string; gagnes: numbe
             return `${l} · ${row?.taux ?? 0} % de réussite`;
           }}
         />
-        <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
-        <Bar dataKey="gagnes" name="Gagnés" stackId="p" fill="#059669" maxBarSize={22} />
-        <Bar dataKey="perdus" name="Perdus" stackId="p" fill="#f3b4b4" radius={[0, 6, 6, 0]} maxBarSize={22} />
+        <Legend {...LEGEND} />
+        <Bar dataKey="gagnes" name="Gagnés" stackId="p" fill={CHART_BLUE} maxBarSize={18} />
+        <Bar dataKey="perdus" name="Perdus" stackId="p" fill={CHART_MUTED} radius={[0, 3, 3, 0]} maxBarSize={18} />
       </BarChart>
     </ResponsiveContainer>
   );
 }
 
-/** Barres horizontales colorées (montants ou pourcentages) */
-export function HBars({ data, unit = "mad", height }: { data: (Slice & { hint?: string })[]; unit?: "mad" | "pct"; height?: number }) {
+/** Barres horizontales (montants ou pourcentages) — une seule couleur par défaut */
+export function HBars({ data, unit = "mad", height, color = CHART_BLUE }: { data: (Partial<Slice> & { name: string; value: number; hint?: string })[]; unit?: "mad" | "pct"; height?: number; color?: string }) {
   const fmt = (v: number) => (unit === "mad" ? mad(v) : `${v} %`);
   return (
-    <ResponsiveContainer width="100%" height={height ?? Math.max(200, data.length * 40 + 20)}>
+    <ResponsiveContainer width="100%" height={height ?? Math.max(180, data.length * 34 + 20)}>
       <BarChart data={data} layout="vertical" margin={{ top: 0, right: 16, left: 0, bottom: 0 }}>
         <CartesianGrid horizontal={false} stroke={GRID} />
-        <XAxis type="number" tick={AXIS} tickLine={false} axisLine={false} tickFormatter={(v) => (unit === "mad" ? madShort(Number(v)) : `${v} %`)} domain={unit === "pct" ? [0, (max: number) => Math.max(10, Math.ceil(max / 5) * 5)] : undefined} />
+        <XAxis
+          type="number"
+          tick={AXIS}
+          tickLine={false}
+          axisLine={false}
+          tickFormatter={(v) => (unit === "mad" ? madShort(Number(v)) : `${v} %`)}
+          domain={unit === "pct" ? [0, (max: number) => Math.max(10, Math.ceil(max / 5) * 5)] : undefined}
+        />
         <YAxis type="category" dataKey="name" tick={AXIS} tickLine={false} axisLine={false} width={104} />
         <Tooltip
           {...TIP}
@@ -160,11 +179,7 @@ export function HBars({ data, unit = "mad", height }: { data: (Slice & { hint?: 
             return [hint ? `${fmt(Number(v))} · ${hint}` : fmt(Number(v)), unit === "mad" ? "Montant" : "Taux"];
           }}
         />
-        <Bar dataKey="value" radius={[0, 8, 8, 0]} maxBarSize={24}>
-          {data.map((d) => (
-            <Cell key={d.name} fill={d.color} />
-          ))}
-        </Bar>
+        <Bar dataKey="value" fill={color} radius={[0, 3, 3, 0]} maxBarSize={18} />
       </BarChart>
     </ResponsiveContainer>
   );

@@ -5,7 +5,9 @@ import { requireDirection } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { ENTITY_IDS, type EntityId } from "@/lib/entities";
 import type { Profile, Role } from "@/lib/types";
-import { str } from "@/lib/utils";
+import { ROLE_LABEL, str } from "@/lib/utils";
+import { logAudit } from "@/lib/audit";
+import { flash } from "@/lib/flash";
 
 export type MemberFormState = { error?: string; ok?: number } | undefined;
 
@@ -44,6 +46,29 @@ export async function updateMember(id: string, _state: MemberFormState, formData
     .eq("id", id);
   if (error) return { error: "Impossible d'enregistrer les modifications." };
 
+  if (role !== member.role) {
+    await logAudit({
+      action: "equipe.role",
+      entity_id: null,
+      target_type: "profile",
+      target_id: member.id,
+      summary: `Rôle de ${member.full_name} : ${ROLE_LABEL[member.role]} → ${ROLE_LABEL[role]}`,
+      actor: me,
+      meta: { from: member.role, to: role },
+    });
+  }
+  if (active !== member.active) {
+    await logAudit({
+      action: "equipe.acces",
+      entity_id: null,
+      target_type: "profile",
+      target_id: member.id,
+      summary: `Accès de ${member.full_name} ${active ? "réactivé" : "désactivé"}`,
+      actor: me,
+    });
+  }
+
   revalidatePath("/equipe");
+  await flash(`${member.full_name} mis à jour`);
   return { ok: Date.now() };
 }

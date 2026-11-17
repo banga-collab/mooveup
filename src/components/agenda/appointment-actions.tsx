@@ -1,64 +1,126 @@
+"use client";
+
 import Link from "next/link";
-import type { ReactNode } from "react";
-import { Ban, CheckCheck, CircleCheck, DoorOpen, Pencil, RotateCcw, ShoppingCart, Trash2, UserX } from "lucide-react";
-import { deleteAppointment, setAppointmentStatus } from "@/actions/agenda";
+import { createContext, useContext, useOptimistic, useTransition, type ReactNode } from "react";
+import { Ban, CalendarX2, CheckCheck, CircleCheck, DoorOpen, Pencil, RotateCcw, ShoppingCart, Trash2, UserX } from "lucide-react";
+import { deleteAppointment } from "@/actions/agenda";
+import { cancelSeries, restoreStatuses, setStatusQuick } from "@/actions/agenda-plus";
 import type { AppointmentStatus } from "@/lib/types";
 import { ConfirmButton } from "@/components/confirm-button";
-import { cn } from "@/lib/utils";
+import { Badge, buttonClass } from "@/components/ui";
+import { APPT_STATUS_LABEL, cn } from "@/lib/utils";
+import { APPT_TONE } from "./status";
+import { notify } from "./undo-toast";
 
-/** Couleurs des statuts de rendez-vous */
-export const APPT_TONE: Record<AppointmentStatus, { pill: string; dot: string }> = {
-  prevu: { pill: "bg-amber-50 text-amber-700 ring-amber-100", dot: "bg-amber-400" },
-  confirme: { pill: "bg-brand-50 text-brand-600 ring-brand-100", dot: "bg-brand-500" },
-  arrive: { pill: "bg-emerald-50 text-emerald-700 ring-emerald-100", dot: "bg-emerald-500" },
-  termine: { pill: "bg-slate-100 text-slate-600 ring-slate-200", dot: "bg-slate-400" },
-  absent: { pill: "bg-red-50 text-red-600 ring-red-100", dot: "bg-red-500" },
-  annule: { pill: "bg-slate-50 text-slate-400 ring-slate-200", dot: "bg-slate-300" },
-};
-
-type Quick = { to: AppointmentStatus; label: string; icon: ReactNode; when: AppointmentStatus[]; cls: string };
+type Quick = { to: AppointmentStatus; label: string; icon: ReactNode; when: AppointmentStatus[]; main?: boolean };
 
 const QUICK: Quick[] = [
-  { to: "confirme", label: "Confirmer", icon: <CircleCheck className="size-4" />, when: ["prevu"], cls: "border-brand-200 bg-brand-50 text-brand-600 hover:bg-brand-100" },
-  { to: "arrive", label: "Arrivé", icon: <DoorOpen className="size-4" />, when: ["prevu", "confirme"], cls: "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" },
-  { to: "termine", label: "Terminé", icon: <CheckCheck className="size-4" />, when: ["prevu", "confirme", "arrive"], cls: "border-slate-200 bg-white text-slate-700 hover:bg-canvas" },
-  { to: "absent", label: "Absent", icon: <UserX className="size-4" />, when: ["prevu", "confirme"], cls: "border-red-200 bg-white text-red-600 hover:bg-red-50" },
-  { to: "annule", label: "Annuler", icon: <Ban className="size-4" />, when: ["prevu", "confirme", "arrive"], cls: "border-slate-200 bg-white text-slate-500 hover:bg-canvas" },
-  { to: "prevu", label: "Remettre prévu", icon: <RotateCcw className="size-4" />, when: ["absent", "annule"], cls: "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100" },
+  { to: "confirme", label: "Confirmer", icon: <CircleCheck />, when: ["prevu"], main: true },
+  { to: "arrive", label: "Arrivé", icon: <DoorOpen />, when: ["prevu", "confirme"], main: true },
+  { to: "termine", label: "Terminé", icon: <CheckCheck />, when: ["prevu", "confirme", "arrive"] },
+  { to: "absent", label: "Absent", icon: <UserX />, when: ["prevu", "confirme"] },
+  { to: "annule", label: "Annuler", icon: <Ban />, when: ["prevu", "confirme", "arrive"] },
+  { to: "prevu", label: "Remettre prévu", icon: <RotateCcw />, when: ["absent", "annule"] },
 ];
 
-const small = "inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-xs font-semibold transition active:scale-[.98] whitespace-nowrap";
+/* ---------- Statut optimiste partagé (badge + boutons d'un même rendez-vous) ---------- */
+type Ctx = { status: AppointmentStatus; change: (to: AppointmentStatus) => void; pending: boolean };
+const StatusCtx = createContext<Ctx | null>(null);
 
-/** Actions rapides d'un rendez-vous (statut, encaissement, modification, suppression) */
-export function AppointmentActions({ id, status, compact = false }: { id: string; status: AppointmentStatus; compact?: boolean }) {
-  const quick = QUICK.filter((q) => q.when.includes(status));
-  const canCash = status === "arrive" || status === "termine";
+function useStatusState(id: string, status: AppointmentStatus): Ctx {
+  const [optimistic, setOptimistic] = useOptimistic(status);
+  const [pending, start] = useTransition();
+  const change = (to: AppointmentStatus) =>
+    start(async () => {
+      setOptimistic(to);
+      const r = await setStatusQuick(id, to);
+      if (!r.ok) notify({ m: r.error, t: "error" });
+      else
+        notify({
+          m: r.message,
+          undo: async () => {
+            const u = await restoreStatuses(r.prev);
+            if (!u.ok) notify({ m: u.error, t: "error" });
+          },
+        });
+    });
+  return { status: optimistic, change, pending };
+}
+
+/** Partage le statut optimiste d'un rendez-vous entre `LiveStatusBadge` et `AppointmentActions` */
+export function ApptStatusScope({ id, status, children }: { id: string; status: AppointmentStatus; children: ReactNode }) {
+  const value = useStatusState(id, status);
+  return <StatusCtx.Provider value={value}>{children}</StatusCtx.Provider>;
+}
+
+/** Badge de statut, mis à jour instantanément dans un `ApptStatusScope` */
+export function LiveStatusBadge({ status }: { status: AppointmentStatus }) {
+  const ctx = useContext(StatusCtx);
+  const s = ctx?.status ?? status;
+  return <Badge tone={APPT_TONE[s].tone}>{APPT_STATUS_LABEL[s]}</Badge>;
+}
+
+/** Actions rapides d'un rendez-vous (statut instantané, encaissement, série, modification, suppression) */
+export function AppointmentActions({ id, status, compact = false, seriesId = null }: { id: string; status: AppointmentStatus; compact?: boolean; seriesId?: string | null }) {
+  const own = useStatusState(id, status);
+  const ctx = useContext(StatusCtx) ?? own;
+  const [seriesPending, startSeries] = useTransition();
+  const cur = ctx.status;
+  const quick = QUICK.filter((q) => q.when.includes(cur));
+  const canCash = cur === "arrive" || cur === "termine";
+  const mainTo = canCash ? null : quick.find((q) => q.main)?.to;
+
+  const cancelAll = () =>
+    startSeries(async () => {
+      const r = await cancelSeries(id);
+      if (!r.ok) notify({ m: r.error, t: "error" });
+      else
+        notify({
+          m: r.message,
+          undo: async () => {
+            const u = await restoreStatuses(r.prev.snaps, r.prev.seriesId);
+            if (!u.ok) notify({ m: u.error, t: "error" });
+          },
+        });
+    });
+
   return (
-    <div className={cn("flex flex-wrap items-center gap-1.5", compact && "gap-1")}>
+    <div className="flex flex-wrap items-center gap-1.5" aria-busy={ctx.pending || seriesPending}>
       {canCash && (
-        <Link href={`/caisse?rdv=${id}`} className={cn(small, "border-accent-500 bg-accent-500 text-white shadow-sm shadow-accent-500/20 hover:bg-accent-600")}>
-          <ShoppingCart className="size-4" /> Encaisser
+        <Link href={`/caisse?rdv=${id}`} className={buttonClass("primary")}>
+          <ShoppingCart /> Encaisser
         </Link>
       )}
       {quick.map((q) => (
-        <form key={q.to} action={setAppointmentStatus.bind(null, id, q.to)}>
-          <button type="submit" className={cn(small, q.cls)} title={q.label}>
-            {q.icon}
-            <span className={cn(compact && "sr-only sm:not-sr-only")}>{q.label}</span>
-          </button>
-        </form>
+        <button
+          key={q.to}
+          type="button"
+          onClick={() => ctx.change(q.to)}
+          className={buttonClass(q.to === mainTo ? "brand" : "secondary", "px-3")}
+          title={q.label}
+          aria-label={q.label}
+        >
+          {q.icon}
+          <span className={cn(compact && "sr-only sm:not-sr-only")}>{q.label}</span>
+        </button>
       ))}
-      <Link href={`/agenda/${id}/modifier`} className={cn(small, "border-line bg-white text-slate-600 hover:bg-canvas")} title="Modifier">
-        <Pencil className="size-4" />
-        <span className={cn(compact && "sr-only")}>Modifier</span>
-      </Link>
-      <form action={deleteAppointment.bind(null, id)}>
-        <ConfirmButton message="Supprimer définitivement ce rendez-vous ?" className="h-9 rounded-xl px-3 text-xs">
-          <Trash2 className="size-4" />
-          <span className={cn(compact && "sr-only")}>Supprimer</span>
-        </ConfirmButton>
-      </form>
+      {seriesId && (cur === "prevu" || cur === "confirme") && (
+        <button type="button" onClick={cancelAll} disabled={seriesPending} className={buttonClass("ghost", "px-3")} title="Annuler cette séance et toutes les suivantes">
+          <CalendarX2 />
+          <span className={cn(compact && "sr-only sm:not-sr-only")}>Annuler la série</span>
+        </button>
+      )}
+      <span className="ml-auto flex items-center gap-1">
+        <Link href={`/agenda/${id}/modifier`} className={buttonClass("ghost", "w-9 px-0")} title="Modifier" aria-label="Modifier le rendez-vous">
+          <Pencil />
+        </Link>
+        <form action={deleteAppointment.bind(null, id)}>
+          <ConfirmButton message="Supprimer définitivement ce rendez-vous ?" className="w-9 border-transparent px-0">
+            <Trash2 />
+            <span className="sr-only">Supprimer le rendez-vous</span>
+          </ConfirmButton>
+        </form>
+      </span>
     </div>
   );
 }
-

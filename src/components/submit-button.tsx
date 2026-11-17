@@ -3,6 +3,7 @@
 import { useFormStatus } from "react-dom";
 import { Loader2 } from "lucide-react";
 import { buttonClass } from "./ui";
+import { useActionPending } from "./action-form";
 
 export function SubmitButton({
   children,
@@ -15,7 +16,9 @@ export function SubmitButton({
   className?: string;
   pendingText?: string;
 }) {
-  const { pending } = useFormStatus();
+  const status = useFormStatus();
+  const ctxPending = useActionPending();
+  const pending = status.pending || ctxPending;
   return (
     <button type="submit" disabled={pending} className={buttonClass(variant, className)}>
       {pending ? (

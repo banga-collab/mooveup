@@ -10,7 +10,7 @@ import { SubscriptionForm, type Plan } from "@/components/subscriptions/subscrip
 
 export const metadata = { title: "Nouvel abonnement" };
 
-export default async function NewSubscriptionPage({ searchParams }: { searchParams: Promise<{ contact?: string }> }) {
+export default async function NewSubscriptionPage({ searchParams }: { searchParams: Promise<{ contact?: string; formule?: string }> }) {
   const [sp, scope] = await Promise.all([searchParams, getScope()]);
   const supabase = await createClient();
   const allowedIds = scope.allowed.map((e) => e.id);
@@ -42,8 +42,9 @@ export default async function NewSubscriptionPage({ searchParams }: { searchPara
   }));
   // Établissement par défaut : celui du sélecteur, sinon le premier du client qui propose des formules
   const withPlans = scope.allowed.filter((e) => plans.some((p) => p.entity_id === e.id));
+  const presetPlan = sp.formule ? plans.find((p) => p.id === sp.formule) ?? null : null;
   const entityId =
-    scope.current?.id ?? preset?.entity_ids.find((e) => withPlans.some((w) => w.id === e)) ?? withPlans[0]?.id ?? scope.allowed[0]?.id ?? null;
+    presetPlan?.entity_id ?? scope.current?.id ?? preset?.entity_ids.find((e) => withPlans.some((w) => w.id === e)) ?? withPlans[0]?.id ?? scope.allowed[0]?.id ?? null;
   const back = sp.contact ? `/contacts/${sp.contact}` : "/abonnements";
 
   return (
@@ -56,6 +57,7 @@ export default async function NewSubscriptionPage({ searchParams }: { searchPara
         plans={plans}
         defaultContactId={preset?.id ?? null}
         defaultEntityId={entityId}
+        defaultPlanId={presetPlan?.id ?? null}
         today={dayKey()}
         cancelHref={back}
       />

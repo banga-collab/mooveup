@@ -2,6 +2,10 @@ import { createServerClient } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { DEMO, DEMO_ACCOUNTS, demoClient } from "../demo";
+import { installAutoPagination } from "./paginate";
+
+// Lectures complètes au-delà de la limite de 1 000 lignes de Supabase
+if (!DEMO) installAutoPagination();
 
 export async function createClient(): Promise<SupabaseClient> {
   const cookieStore = await cookies();

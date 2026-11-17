@@ -11,8 +11,8 @@ import { METHOD_META, METHOD_ORDER } from "./meta";
 
 export function PrintButton({ className }: { className?: string }) {
   return (
-    <button type="button" onClick={() => window.print()} className={buttonClass("brand", className)}>
-      <Printer className="size-4" /> Imprimer
+    <button type="button" onClick={() => window.print()} className={buttonClass("secondary", className)}>
+      <Printer /> Imprimer
     </button>
   );
 }
@@ -24,20 +24,20 @@ export function PaymentPanel({ action, rest, method: initial }: { action: (state
   if (!open)
     return (
       <button type="button" onClick={() => setOpen(true)} className={buttonClass("primary")}>
-        <HandCoins className="size-4" /> Enregistrer un paiement
+        <HandCoins /> Encaisser le reste
       </button>
     );
   return (
-    <div className="w-full rounded-2xl border border-accent-200 bg-accent-50/50 p-4 animate-fade-up">
+    <div className="w-full rounded-xl border border-line bg-white p-4 animate-fade-up">
       <div className="mb-3 flex items-center justify-between">
-        <p className="font-display text-sm font-bold">Nouveau paiement</p>
-        <button type="button" onClick={() => setOpen(false)} className="grid size-7 place-items-center rounded-lg text-muted hover:bg-white" aria-label="Fermer">
+        <p className="text-sm font-semibold text-ink">Nouveau paiement</p>
+        <button type="button" onClick={() => setOpen(false)} className="grid size-9 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-ink" aria-label="Fermer">
           <X className="size-4" />
         </button>
       </div>
       <ActionForm action={action} className="space-y-3">
         <input type="hidden" name="method" value={method} />
-        <div className="grid grid-cols-5 gap-1.5">
+        <div className="grid grid-cols-5 gap-1.5" role="radiogroup" aria-label="Mode de paiement">
           {METHOD_ORDER.map((m) => {
             const meta = METHOD_META[m];
             const I = meta.icon;
@@ -46,12 +46,16 @@ export function PaymentPanel({ action, rest, method: initial }: { action: (state
               <button
                 key={m}
                 type="button"
+                role="radio"
+                aria-checked={on}
                 title={PAY_LABEL[m]}
                 onClick={() => setMethod(m)}
-                className={cn("flex min-w-0 flex-col items-center gap-1 rounded-xl border px-0.5 py-2 text-[10.5px] font-bold transition", on ? "text-white" : "border-line bg-white text-slate-600")}
-                style={on ? { background: meta.color, borderColor: meta.color } : undefined}
+                className={cn(
+                  "flex min-w-0 flex-col items-center gap-1 rounded-lg border px-0.5 py-2 text-[11px] font-medium transition",
+                  on ? "border-brand-500 bg-brand-50 text-brand-700" : "border-line bg-white text-slate-600 hover:border-slate-300",
+                )}
               >
-                <I className="size-4" />
+                <I className={cn("size-4", on ? "text-brand-600" : "text-slate-400")} />
                 <span className="w-full truncate text-center">{meta.short}</span>
               </button>
             );
@@ -63,12 +67,12 @@ export function PaymentPanel({ action, rest, method: initial }: { action: (state
               name="amount"
               inputMode="decimal"
               defaultValue={String(rest)}
-              className="h-11 w-full rounded-xl border border-line bg-white pl-3.5 pr-12 text-sm font-semibold focus:border-brand-400 focus:outline-none focus:ring-4 focus:ring-brand-50"
+              className="h-10 w-full rounded-lg border border-line bg-white pl-3 pr-12 text-sm font-medium tabular-nums focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-500/15"
               aria-label="Montant reçu"
             />
-            <span className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-muted">MAD</span>
+            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted">MAD</span>
           </span>
-          <SubmitButton>Valider</SubmitButton>
+          <SubmitButton className="h-10">Valider</SubmitButton>
         </div>
       </ActionForm>
     </div>
