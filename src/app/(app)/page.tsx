@@ -1,12 +1,13 @@
 import Link from "next/link";
-import { AlarmClock, CalendarCheck, CalendarDays, CircleDollarSign, Filter, ListChecks, Receipt, ShoppingCart, Users } from "lucide-react";
+import { AlarmClock, CalendarCheck, CalendarDays, CalendarPlus, CircleDollarSign, Filter, ListChecks, Receipt, ScanLine, ShoppingCart, UserPlus, Users } from "lucide-react";
 import { getProfile, getScope } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { entity } from "@/lib/entities";
 import { byId, lastMonths, monthKey } from "@/lib/data";
 import { APPT_STATUS_LABEL, addDaysKey, agadirHour, agadirToIso, cn, dayKey, fmtTime, mad, madShort, pct } from "@/lib/utils";
 import type { Appointment, AppointmentStatus, Contact, Lead, Sale, Subscription } from "@/lib/types";
-import { SolidTile, ShortcutTile } from "@/components/stat-tile";
+import { ShortcutTile } from "@/components/stat-tile";
+import { KpiStrip } from "@/components/kpi-strip";
 import { Badge, Card, CardHeader, Empty, LinkButton, tableClass } from "@/components/ui";
 import { EntityBadge } from "@/components/entity-icon";
 
@@ -143,22 +144,33 @@ export default async function Dashboard() {
         </div>
       </div>
 
-      {/* Indicateurs */}
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4 [&>*]:min-w-0">
-        <SolidTile
-          href="/rapports"
-          label="CA du mois"
-          value={madShort(revMonth)}
-          sub={`Auj. ${madShort(revToday)}`}
-          icon={<CircleDollarSign />}
-          trendLabel={revTrend === null ? undefined : `${revTrend > 0 ? "+" : ""}${revTrend} %`}
-          trendUp={revTrend === null || revTrend === 0 ? null : revTrend > 0}
-          series={months.map((m) => revOf(m.key))}
-        />
-        <SolidTile href="/contacts?statut=client" label="Clients actifs" value={clientsCount ?? 0} sub={`+${newContacts ?? 0} contacts en 30 j`} icon={<Users />} />
-        <SolidTile href="/agenda" label="Rendez-vous aujourd'hui" value={todayAppts.length} sub={`${welcomed} accueillis`} icon={<CalendarDays />} />
-        <SolidTile href="/prospects" label="Prospects en cours" value={open} sub={closed30 ? `${pct(won30, closed30)} % convertis en 30 j` : "Aucun clôturé en 30 j"} icon={<Filter />} />
-      </div>
+      {/* Mode tablette : grandes actions d'accueil */}
+      <nav data-tablet-only="grid" aria-label="Accès rapide" className="hidden grid-cols-2 gap-3 md:grid-cols-4">
+        <BigAction href="/acces" icon={<ScanLine />} label="Scanner une entrée" />
+        <BigAction href="/caisse" icon={<ShoppingCart />} label="Encaisser" accent />
+        <BigAction href="/agenda/nouveau" icon={<CalendarPlus />} label="Nouveau rendez-vous" />
+        <BigAction href="/contacts/nouveau" icon={<UserPlus />} label="Nouveau client" />
+      </nav>
+
+      {/* Indicateurs (repliables en une ligne, préférence mémorisée) */}
+      <KpiStrip
+        id="dashboard"
+        items={[
+          {
+            href: "/rapports",
+            label: "CA du mois",
+            value: madShort(revMonth),
+            sub: `Auj. ${madShort(revToday)}`,
+            icon: <CircleDollarSign />,
+            trendLabel: revTrend === null ? undefined : `${revTrend > 0 ? "+" : ""}${revTrend} %`,
+            trendUp: revTrend === null || revTrend === 0 ? null : revTrend > 0,
+            series: months.map((m) => revOf(m.key)),
+          },
+          { href: "/contacts?statut=client", label: "Clients actifs", value: clientsCount ?? 0, sub: `+${newContacts ?? 0} contacts en 30 j`, icon: <Users /> },
+          { href: "/agenda", label: "Rendez-vous aujourd'hui", value: todayAppts.length, sub: `${welcomed} accueillis`, icon: <CalendarDays /> },
+          { href: "/prospects", label: "Prospects en cours", value: open, sub: closed30 ? `${pct(won30, closed30)} % convertis en 30 j` : "Aucun clôturé en 30 j", icon: <Filter /> },
+        ]}
+      />
 
       {/* À faire maintenant */}
       <section aria-labelledby="todo-title">
@@ -315,6 +327,22 @@ export default async function Dashboard() {
         </Card>
       )}
     </div>
+  );
+}
+
+/** Grande action tactile (visible seulement en mode tablette) */
+function BigAction({ href, icon, label, accent }: { href: string; icon: React.ReactNode; label: string; accent?: boolean }) {
+  return (
+    <Link
+      href={href}
+      className={cn(
+        "flex min-h-20 items-center gap-3 rounded-xl border px-4 text-[15px] font-semibold transition active:scale-[.98] [&_svg]:size-6 [&_svg]:shrink-0",
+        accent ? "border-accent-500 bg-accent-500 text-white" : "border-line bg-white text-ink hover:border-slate-300 [&_svg]:text-brand-500",
+      )}
+    >
+      {icon}
+      <span className="min-w-0 leading-tight">{label}</span>
+    </Link>
   );
 }
 

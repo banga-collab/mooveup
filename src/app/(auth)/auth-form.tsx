@@ -6,28 +6,42 @@ import { ArrowRight, ConciergeBell, Eye, EyeOff, Languages, Loader2, MailCheck, 
 import { signIn, signUp, type AuthState } from "./actions";
 import { setLang } from "@/actions/preferences";
 import { useLang, useT } from "@/lib/i18n/client";
+import { LANGS, type Lang } from "@/lib/i18n/core";
 import { ErrorNote, Field, Input, buttonClass } from "@/components/ui";
 
 type DemoAccount = { email: string; password: string; label: string; name: string; space: string };
 
 const ROLE_OF: Record<string, string> = { Direction: "direction", Manager: "manager", "Réception": "reception" };
 
-/** Bascule Français / العربية avant connexion */
+/** Choix de la langue avant connexion : Français / العربية / English */
 export function LangSwitch() {
   const lang = useLang();
+  const t = useT();
   const [pending, start] = useTransition();
-  const next = lang === "ar" ? "fr" : "ar";
+  const [target, setTarget] = useState<Lang | null>(null);
   return (
-    <button
-      type="button"
-      onClick={() => start(() => setLang(next))}
-      disabled={pending}
-      lang={next}
-      className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium text-slate-500 transition hover:bg-slate-100 hover:text-ink disabled:opacity-60"
-    >
-      {pending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Languages className="size-4" aria-hidden />}
-      {next === "ar" ? "العربية" : "Français"}
-    </button>
+    <div role="radiogroup" aria-label={t("user.lang")} className="inline-flex items-center gap-0.5 rounded-lg p-0.5">
+      <Languages className="mx-1 size-4 text-slate-400" aria-hidden />
+      {LANGS.map(({ id, label }) => (
+        <button
+          key={id}
+          type="button"
+          role="radio"
+          aria-checked={lang === id}
+          lang={id}
+          disabled={pending}
+          onClick={() => {
+            if (id === lang) return;
+            setTarget(id);
+            start(() => setLang(id));
+          }}
+          className={`inline-flex h-9 items-center gap-1 rounded-md px-2 text-[13px] font-medium transition disabled:opacity-60 ${lang === id ? "bg-slate-100 text-ink" : "text-slate-500 hover:bg-slate-50 hover:text-ink"}`}
+        >
+          {pending && target === id && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
+          {label}
+        </button>
+      ))}
+    </div>
   );
 }
 

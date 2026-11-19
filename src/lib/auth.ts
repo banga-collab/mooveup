@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { cache } from "react";
 import { createClient } from "./supabase/server";
 import { ENTITIES, ENTITY_IDS, type Entity, type EntityId } from "./entities";
+import { loadEstablishments } from "./establishments";
 import type { Profile } from "./types";
 
 /** Profil de l'utilisateur connecté (mis en cache par requête). */
@@ -49,10 +50,11 @@ export type Scope = {
  * limité aux établissements autorisés pour ce profil.
  */
 export const getScope = cache(async (): Promise<Scope> => {
-  const p = await getProfile();
+  // Liste lue en base (repli sur la liste fixe) : enregistre aussi les établissements ajoutés dans entities.ts
+  const [p, list] = await Promise.all([getProfile(), loadEstablishments().catch(() => ENTITIES)]);
   const ids = allowedEntities(p);
-  const allowed = ENTITIES.filter((e) => ids.includes(e.id));
+  const allowed = list.filter((e) => e.active !== false && ids.includes(e.id));
   const chosen = (await cookies()).get("scope")?.value;
   const current = allowed.find((e) => e.id === chosen) ?? (allowed.length === 1 ? allowed[0]! : null);
-  return { current, ids: current ? [current.id] : ids, allowed };
+  return { current, ids: current ? [current.id] : allowed.map((e) => e.id), allowed };
 });

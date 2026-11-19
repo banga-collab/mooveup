@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { AlertTriangle, Boxes, X } from "lucide-react";
+import { AlertTriangle, ArrowLeftRight, Barcode, Boxes, X } from "lucide-react";
 import { entity } from "@/lib/entities";
 import { cn, fmtDate, mad } from "@/lib/utils";
-import { MOVEMENT_REASON_LABEL, type StockMovement, type Supplier } from "@/lib/types-ops";
+import type { StockMovement, Supplier } from "@/lib/types-ops";
 import { addMovement, saveStockSettings } from "@/actions/stock";
 import { ActionForm } from "@/components/action-form";
 import { SubmitButton } from "@/components/submit-button";
@@ -14,7 +14,7 @@ import { matchesQuery } from "@/lib/search-match";
 import { one } from "@/components/data-table/match";
 import { clearHref, entityFilter } from "@/components/reports/list-kit";
 import { EntityBadge } from "@/components/entity-icon";
-import type { ProductRow } from "./lib";
+import { reasonLabel, type ProductRow } from "./lib";
 
 type SP = Record<string, string | string[] | undefined>;
 const FILTERS = ["q", "etab", "etat", "categorie"];
@@ -35,6 +35,7 @@ export function ProductsTab({
   sp,
   selected,
   selectedMoves,
+  siblings = [],
   suppliers,
   canWrite,
 }: {
@@ -42,6 +43,8 @@ export function ProductsTab({
   sp: SP;
   selected: ProductRow | null;
   selectedMoves: StockMovement[];
+  /** Le même produit dans les autres établissements */
+  siblings?: ProductRow[];
   suppliers: Supplier[];
   canWrite: boolean;
 }) {
@@ -59,7 +62,7 @@ export function ProductsTab({
         (!fEtab || r.item.entity_id === fEtab) &&
         (!fCat || (r.item.category || "Boutique") === fCat) &&
         (!fState || (fState === "rupture" ? r.stock === 0 : fState === "commander" ? r.low : !r.low)) &&
-        matchesQuery(q, r.item.name, r.item.category, r.supplier?.name, r.supplier?.contact_name, entity(r.item.entity_id)?.short, r.item.price_mad),
+        matchesQuery(q, r.item.name, r.item.category, r.barcode, r.supplier?.name, r.supplier?.contact_name, entity(r.item.entity_id)?.short, r.item.price_mad),
     )
     .sort((a, b) => Number(b.low) - Number(a.low) || a.item.name.localeCompare(b.item.name));
   const tableRows: DataRow[] = list.map((r) => ({
@@ -69,7 +72,10 @@ export function ProductsTab({
       name: (
         <span>
           <span className="font-medium text-ink">{r.item.name}</span>
-          <span className="block text-xs text-muted">Vendu {mad(Number(r.item.price_mad))}</span>
+          <span className="block text-xs text-muted">
+            Vendu {mad(Number(r.item.price_mad))}
+            {r.barcode && <span className="ml-1.5 tabular-nums text-slate-400">· {r.barcode}</span>}
+          </span>
         </span>
       ),
       etab: <EntityBadge id={r.item.entity_id} />,
@@ -95,7 +101,7 @@ export function ProductsTab({
 
   return (
     <div className="space-y-6">
-      {selected && <ProductDetail row={selected} moves={selectedMoves} suppliers={suppliers} canWrite={canWrite} />}
+      {selected && <ProductDetail row={selected} moves={selectedMoves} siblings={siblings} suppliers={suppliers} canWrite={canWrite} />}
 
       {low.length > 0 && !selected && !filtered && (
         <Card className="border-accent-200">
@@ -136,7 +142,7 @@ export function ProductsTab({
         {rows.length > 0 && (
           <ListToolbar
             className="mb-3"
-            placeholder="Produit, catégorie, fournisseur…"
+            placeholder="Produit, code-barres, catégorie, fournisseur…"
             filters={[
               ...entityFilter(
                 entityIds.map((id) => ({ id, short: entity(id)?.short ?? id })),
@@ -185,7 +191,7 @@ export function ProductsTab({
   );
 }
 
-function ProductDetail({ row: r, moves, suppliers, canWrite }: { row: ProductRow; moves: StockMovement[]; suppliers: Supplier[]; canWrite: boolean }) {
+function ProductDetail({ row: r, moves, siblings, suppliers, canWrite }: { row: ProductRow; moves: StockMovement[]; siblings: ProductRow[]; suppliers: Supplier[]; canWrite: boolean }) {
   const e = entity(r.item.entity_id);
   const options = suppliers.filter((s) => !s.entity_ids?.length || s.entity_ids.includes(r.item.entity_id));
   return (
@@ -194,7 +200,7 @@ function ProductDetail({ row: r, moves, suppliers, canWrite }: { row: ProductRow
         title={r.item.name}
         subtitle={`${e?.short ?? ""} · ${r.item.category || "Boutique"}`}
         action={
-          <Link href="/stock" className="grid size-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-ink" aria-label="Fermer">
+          <Link href="/stock?onglet=produits" className="grid size-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-ink" aria-label="Fermer">
             <X className="size-4" />
           </Link>
         }
@@ -207,9 +213,31 @@ function ProductDetail({ row: r, moves, suppliers, canWrite }: { row: ProductRow
               ["Seuil d'alerte", r.alert],
               ["Valeur du stock", mad(r.value)],
               ["Prix de vente", mad(Number(r.item.price_mad))],
+              ["Code-barres", r.barcode ? <span key="b" className="tabular-nums">{r.barcode}</span> : "—"],
               ["Fournisseur", r.supplier?.name ?? "—"],
             ]}
           />
+          {siblings.length > 0 && (
+            <div className="mt-4">
+              <p className="mb-1.5 text-[13px] font-semibold text-ink">Dans les autres établissements</p>
+              <ul className="divide-y divide-line rounded-lg border border-line">
+                {siblings.map((x) => (
+                  <li key={x.item.id} className="flex items-center gap-2 px-3 py-2 text-[13px]">
+                    <Link href={`/stock?onglet=produits&produit=${x.item.id}`} className="min-w-0 flex-1 hover:text-brand-600">
+                      <EntityBadge id={x.item.entity_id} />
+                    </Link>
+                    <span className={cn("tabular-nums font-semibold", x.stock === 0 ? "text-red-600" : x.low ? "text-accent-600" : "text-ink")}>{x.stock}</span>
+                    <span className="w-14 text-right text-xs tabular-nums text-muted">seuil {x.alert}</span>
+                  </li>
+                ))}
+              </ul>
+              {canWrite && (
+                <Link href={`/stock?onglet=transferts&vers=${r.item.entity_id}&produit=${r.item.id}`} className="mt-2 inline-flex items-center gap-1.5 text-[13px] font-medium text-brand-600 hover:underline">
+                  <ArrowLeftRight className="size-3.5" /> Transférer depuis un autre établissement
+                </Link>
+              )}
+            </div>
+          )}
         </div>
 
         {canWrite ? (
@@ -232,7 +260,7 @@ function ProductDetail({ row: r, moves, suppliers, canWrite }: { row: ProductRow
               </SubmitButton>
             </ActionForm>
             <details className="group">
-              <summary className="cursor-pointer list-none text-[13px] font-medium text-brand-600 [&::-webkit-details-marker]:hidden">Seuil, prix d&apos;achat et fournisseur</summary>
+              <summary className="cursor-pointer list-none text-[13px] font-medium text-brand-600 [&::-webkit-details-marker]:hidden">Seuil, prix d&apos;achat, code-barres et fournisseur</summary>
               <ActionForm action={saveStockSettings.bind(null, r.item.id)} className="mt-3 space-y-3">
                 <div className="grid grid-cols-2 gap-2 [&>*]:min-w-0">
                   <Field label="Seuil d'alerte">
@@ -242,6 +270,12 @@ function ProductDetail({ row: r, moves, suppliers, canWrite }: { row: ProductRow
                     <Input name="unit_cost_mad" inputMode="decimal" defaultValue={r.hasCost ? r.cost : ""} />
                   </Field>
                 </div>
+                <Field label="Code-barres (EAN)" hint="Scannez le produit dans ce champ">
+                  <span className="relative block">
+                    <Barcode className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+                    <Input name="barcode" defaultValue={r.barcode ?? ""} inputMode="numeric" maxLength={32} className="pl-9 tabular-nums" />
+                  </span>
+                </Field>
                 <Field label="Fournisseur">
                   <Select name="supplier_id" defaultValue={r.supplier?.id ?? ""}>
                     <option value="">Aucun</option>
@@ -269,7 +303,7 @@ function ProductDetail({ row: r, moves, suppliers, canWrite }: { row: ProductRow
               {moves.map((m) => (
                 <li key={m.id} className="flex items-center justify-between gap-3 text-[13px]">
                   <span className="min-w-0 truncate text-slate-600">
-                    {fmtDate(m.created_at, { day: "numeric", month: "short" })} · {MOVEMENT_REASON_LABEL[m.reason]}
+                    {fmtDate(m.created_at, { day: "numeric", month: "short" })} · {reasonLabel(m.reason)}
                   </span>
                   <span className={cn("shrink-0 font-semibold tabular-nums", m.qty > 0 ? "text-emerald-600" : m.qty < 0 ? "text-slate-700" : "text-slate-400")}>
                     {m.qty > 0 ? "+" : ""}

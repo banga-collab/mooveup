@@ -8,23 +8,28 @@ import type { PurchaseOrder, StockMovement, StockSetting, Supplier } from "@/lib
 import { validateInventory } from "@/actions/stock";
 import { SolidTile } from "@/components/stat-tile";
 import { Card, Empty, LinkButton, PageHeader, Segmented } from "@/components/ui";
-import { buildRows } from "@/components/stock/lib";
+import { buildRows, type StockTransfer } from "@/components/stock/lib";
 import { ProductsTab } from "@/components/stock/products-tab";
 import { MovementsTab, PERIODS } from "@/components/stock/movements-tab";
 import { InventoryForm } from "@/components/stock/inventory-form";
-import { SuppliersTab } from "@/components/stock/suppliers-tab";
 import { OrdersTab } from "@/components/stock/orders-tab";
+import { GlobalTab } from "@/components/stock/global-tab";
+import { TransfersTab } from "@/components/stock/transfers-tab";
 
 export const metadata = { title: "Stock" };
 
-const TABS = ["produits", "mouvements", "inventaire", "fournisseurs", "commandes"] as const;
+const TABS = ["global", "produits", "mouvements", "transferts", "inventaire", "commandes"] as const;
 type Tab = (typeof TABS)[number];
 
 type SP = Record<string, string | undefined>;
 
 export default async function StockPage({ searchParams }: { searchParams: Promise<SP> }) {
   const [sp, me, scope] = await Promise.all([searchParams, getProfile(), getScope()]);
-  const tab: Tab = TABS.includes(sp.onglet as Tab) ? (sp.onglet as Tab) : "produits";
+  const entities = scope.allowed.filter((e) => scope.ids.includes(e.id));
+  const multi = entities.length > 1;
+  // Plusieurs établissements : vue globale par défaut ; un produit ou un établissement demandé → vue par établissement
+  const fallback: Tab = !multi || sp.produit || sp.etab ? "produits" : "global";
+  const tab: Tab = TABS.includes(sp.onglet as Tab) && (sp.onglet !== "global" || multi) ? (sp.onglet as Tab) : fallback;
   const canWrite = me.role !== "staff";
   const supabase = await createClient();
   const today = dayKey();
@@ -53,48 +58,67 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
   const stockValue = rows.reduce((a, r) => a + r.value, 0);
   const lowCount = rows.filter((r) => r.low).length;
   const pending = orders.filter((o) => o.status === "envoyee");
-  const entities = scope.allowed.filter((e) => scope.ids.includes(e.id));
   const withProducts = entities.filter((e) => rows.some((r) => r.item.entity_id === e.id));
   const lowEntity = rows.find((r) => r.low)?.item.entity_id ?? withProducts[0]?.id;
+  const etabQ = sp.etab && entities.some((e) => e.id === sp.etab) ? `&etab=${sp.etab}` : "";
 
   const tabs = [
-    { id: "produits", label: "Produits", href: "/stock" },
+    ...(multi ? [{ id: "global", label: "Vue globale", href: "/stock?onglet=global" }] : []),
+    { id: "produits", label: multi ? "Par établissement" : "Produits", href: `/stock?onglet=produits${etabQ}` },
     { id: "mouvements", label: "Mouvements", href: "/stock?onglet=mouvements" },
-    { id: "inventaire", label: "Inventaire", href: "/stock?onglet=inventaire" },
-    { id: "fournisseurs", label: "Fournisseurs", href: "/stock?onglet=fournisseurs", count: suppliers.length },
+    ...(multi ? [{ id: "transferts", label: "Transferts", href: "/stock?onglet=transferts" }] : []),
+    { id: "inventaire", label: "Inventaire", href: `/stock?onglet=inventaire${etabQ}` },
     { id: "commandes", label: "Commandes", href: "/stock?onglet=commandes", count: orders.filter((o) => o.status !== "recue").length || undefined },
+    // Répertoire fournisseurs : page dédiée
+    { id: "fournisseurs", label: "Fournisseurs", href: "/fournisseurs", count: suppliers.length || undefined },
   ];
 
-  const headerAction =
-    !canWrite ? null : tab === "fournisseurs" ? (
-      <LinkButton href="/stock?onglet=fournisseurs&nouveau=1" variant="brand">
-        <Plus /> Ajouter un fournisseur
+  const headerAction = !canWrite ? null : tab === "commandes" ? (
+    lowEntity ? (
+      <LinkButton href={`/stock?onglet=commandes&nouveau=${lowEntity}`} variant="brand">
+        <Plus /> Nouvelle commande
       </LinkButton>
-    ) : tab === "commandes" ? (
-      lowEntity ? (
-        <LinkButton href={`/stock?onglet=commandes&nouveau=${lowEntity}`} variant="brand">
-          <Plus /> Nouvelle commande
+    ) : null
+  ) : tab === "global" || tab === "produits" ? (
+    <>
+      {lowCount > 0 && lowEntity && (
+        <LinkButton href={`/stock?onglet=commandes&nouveau=${lowEntity}`} variant="secondary">
+          <ClipboardList /> Préparer une commande
         </LinkButton>
-      ) : null
-    ) : tab === "produits" ? (
-      <>
-        {lowCount > 0 && lowEntity && (
-          <LinkButton href={`/stock?onglet=commandes&nouveau=${lowEntity}`} variant="secondary">
-            <ClipboardList /> Préparer une commande
-          </LinkButton>
-        )}
-        <LinkButton href="/stock?onglet=mouvements#nouveau" variant="brand">
-          <ArrowLeftRight /> Nouveau mouvement
+      )}
+      {multi && (
+        <LinkButton href="/stock?onglet=transferts#nouveau" variant="secondary">
+          <ArrowLeftRight /> Transfert
         </LinkButton>
-      </>
-    ) : null;
+      )}
+      <LinkButton href="/stock?onglet=mouvements#nouveau" variant="brand">
+        <Plus /> Nouveau mouvement
+      </LinkButton>
+    </>
+  ) : null;
 
   /* ---------- Contenu de l'onglet ---------- */
   let content: React.ReactNode;
-  if (tab === "produits") {
+  if (tab === "global") {
+    content = <GlobalTab rows={rows} entityIds={withProducts.map((e) => e.id)} sp={sp} canWrite={canWrite} />;
+  } else if (tab === "produits") {
     const selected = rows.find((r) => r.item.id === sp.produit) ?? null;
+    const siblings = selected ? rows.filter((r) => r.key === selected.key && r.item.id !== selected.item.id) : [];
     const { data: mv } = selected ? await supabase.from("stock_movements").select("*").eq("item_id", selected.item.id).order("created_at", { ascending: false }).limit(8) : { data: [] };
-    content = <ProductsTab rows={rows} sp={sp} selected={selected} selectedMoves={(mv ?? []) as StockMovement[]} suppliers={suppliers} canWrite={canWrite} />;
+    content = (
+      <div className="space-y-4">
+        {multi && withProducts.length > 1 && (
+          <Segmented
+            items={[
+              { id: "", label: "Tous", href: "/stock?onglet=produits", count: rows.length },
+              ...withProducts.map((e) => ({ id: e.id, label: e.short, href: `/stock?onglet=produits&etab=${e.id}`, count: rows.filter((r) => r.item.entity_id === e.id).length })),
+            ]}
+            active={withProducts.some((e) => e.id === sp.etab) ? sp.etab! : ""}
+          />
+        )}
+        <ProductsTab rows={rows} sp={sp} selected={selected} selectedMoves={(mv ?? []) as StockMovement[]} siblings={siblings} suppliers={suppliers} canWrite={canWrite} />
+      </div>
+    );
   } else if (tab === "mouvements") {
     const period = PERIODS.some((p) => p.id === sp.periode) ? sp.periode! : "30";
     const product = rows.some((r) => r.item.id === sp.produit) ? sp.produit! : "";
@@ -103,6 +127,20 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
     if (product) q = q.eq("item_id", product);
     const [{ data: mv }, { data: pr }] = await Promise.all([q.order("created_at", { ascending: false }).limit(300), supabase.from("profiles").select("*")]);
     content = <MovementsTab rows={rows} sp={sp} moves={(mv ?? []) as StockMovement[]} people={byId(pr as Profile[])} product={product} period={period} canWrite={canWrite} />;
+  } else if (tab === "transferts") {
+    const [{ data: tr }, { data: pr }] = await Promise.all([supabase.from("stock_transfers").select("*").order("created_at", { ascending: false }).limit(300), supabase.from("profiles").select("*")]);
+    const ids = new Set<string>(scope.ids);
+    const transfers = ((tr ?? []) as StockTransfer[]).filter((t) => ids.has(t.from_entity_id) || ids.has(t.to_entity_id));
+    content = (
+      <TransfersTab
+        rows={rows}
+        transfers={transfers}
+        people={byId(pr as Profile[])}
+        entities={entities.map((e) => ({ id: e.id, short: e.short, color: e.color }))}
+        sp={sp}
+        canWrite={canWrite}
+      />
+    );
   } else if (tab === "inventaire") {
     const eid = withProducts.find((e) => e.id === sp.etab)?.id ?? (scope.current && withProducts.some((e) => e.id === scope.current!.id) ? scope.current.id : withProducts[0]?.id);
     const list = rows.filter((r) => r.item.entity_id === eid);
@@ -116,18 +154,6 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
       <Card>
         <Empty icon={<Boxes />} title="Aucun produit à inventorier" text="Ajoutez des produits au catalogue pour suivre leur stock." action={<LinkButton href="/catalogue/nouveau?type=produit" variant="brand">Ajouter un produit</LinkButton>} />
       </Card>
-    );
-  } else if (tab === "fournisseurs") {
-    content = (
-      <SuppliersTab
-        sp={sp}
-        suppliers={suppliers}
-        rows={rows}
-        entities={entities.map((e) => ({ id: e.id, short: e.short, color: e.color }))}
-        editing={suppliers.find((s) => s.id === sp.modifier) ?? null}
-        creating={sp.nouveau === "1"}
-        canWrite={canWrite}
-      />
     );
   } else {
     const newEntity = sp.nouveau && entities.some((e) => e.id === sp.nouveau) ? sp.nouveau : null;
@@ -149,10 +175,14 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Stock" subtitle="Produits vendus en boutique, mouvements, inventaires et commandes fournisseurs" actions={headerAction} />
+      <PageHeader
+        title="Stock"
+        subtitle={multi ? `${entities.length} établissements · vue globale, transferts, inventaires et commandes` : `${entities[0]?.short ?? ""} · produits, mouvements, inventaire et commandes`}
+        actions={headerAction}
+      />
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4 [&>*]:min-w-0">
-        <SolidTile label="Valeur du stock" value={madShort(stockValue)} sub={`${rows.reduce((a, r) => a + r.stock, 0)} articles · prix d'achat`} icon={<Wallet />} href="/stock" />
+        <SolidTile label="Valeur du stock" value={madShort(stockValue)} sub={`${rows.reduce((a, r) => a + r.stock, 0)} articles · prix d'achat`} icon={<Wallet />} href={multi ? "/stock?onglet=global" : "/stock"} />
         <SolidTile
           label="Produits à commander"
           value={lowCount}
@@ -160,7 +190,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
           trendLabel={lowCount ? "Alerte" : undefined}
           trendUp={lowCount ? false : null}
           icon={<AlertTriangle />}
-          href="/stock"
+          href="/stock?onglet=produits&etat=commander"
         />
         <SolidTile label="Ventes produits du mois" value={madShort(soldAmount)} sub={`${soldUnits} unité${soldUnits > 1 ? "s" : ""} · ${mad(soldAmount)}`} icon={<ShoppingBag />} href="/stock?onglet=mouvements" />
         <SolidTile label="Commandes en attente" value={pending.length} sub={pending.length ? `${mad(pending.reduce((a, o) => a + Number(o.total_mad), 0))} à recevoir` : "Rien en attente"} icon={<Truck />} href="/stock?onglet=commandes" />

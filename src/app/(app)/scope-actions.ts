@@ -2,12 +2,13 @@
 
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
-import { ENTITY_IDS } from "@/lib/entities";
+import { loadEstablishments } from "@/lib/establishments";
 
 /** Change l'établissement affiché (ou « tout le groupe » avec "all") */
 export async function setScope(id: string) {
   const jar = await cookies();
-  if (id === "all" || !ENTITY_IDS.includes(id as never)) jar.delete("scope");
+  const list = await loadEstablishments();
+  if (id === "all" || !list.some((e) => e.id === id && e.active !== false)) jar.delete("scope");
   else jar.set("scope", id, { path: "/", httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 24 * 365 });
   revalidatePath("/", "layout");
 }

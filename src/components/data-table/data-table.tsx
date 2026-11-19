@@ -2,17 +2,22 @@
 
 import { isValidElement, useMemo, useState, useSyncExternalStore, useTransition, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { ArrowDown, ArrowUp, ArrowUpDown, Check, Columns3, Download, Loader2, X } from "lucide-react";
-import { cn, dayKey } from "@/lib/utils";
+import { ArrowDown, ArrowUp, ArrowUpDown, Check, Columns3, Loader2, X } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { entity } from "@/lib/entities";
 import { Empty, buttonClass, tableClass } from "@/components/ui";
 import { showToast } from "@/components/toaster";
+import { exportTable } from "@/lib/export/client";
+import type { ExportFilter, ExportFormat } from "@/lib/export/types";
+import { ExportMenu } from "./export-menu";
 import { NoResults } from "./no-results";
 import type { BulkAction, CellValue, DataColumn, DataRow } from "./types";
 
 /**
  * Tableau intelligent (lignes déjà filtrées côté serveur) :
  * tri par colonne mémorisé dans l'URL (`?tri=col&ordre=asc`), colonnes visibles
- * mémorisées par tableau (localStorage), export CSV de la vue, « Afficher plus »,
+ * mémorisées par tableau (localStorage), export Excel / PDF / CSV de la vue avec l'en-tête
+ * Moov'Up (colonnes visibles, lignes filtrées et triées), « Afficher plus »,
  * sélection multiple + actions groupées, cartes sous 640 px, lignes cliquables,
  * en-tête collant.
  */
@@ -31,6 +36,8 @@ export function DataTable({
   sortParam = "tri",
   orderParam = "ordre",
   exportName,
+  exportTitle,
+  exportFilters,
   unit = ["résultat", "résultats"],
   total,
   toolbar,
@@ -59,6 +66,10 @@ export function DataTable({
   orderParam?: string;
   /** Préfixe du fichier exporté (défaut : id) */
   exportName?: string;
+  /** Titre de l'export (défaut : titre de la page) */
+  exportTitle?: string;
+  /** Filtres affichés dans l'en-tête d'export (défaut : lus dans l'URL) */
+  exportFilters?: ExportFilter[];
   /** Unité du compteur : [singulier, pluriel] */
   unit?: [string, string];
   /** Nombre total de lignes si le serveur n'en a envoyé qu'une partie (affiche « affinez la recherche ») */
@@ -161,21 +172,21 @@ export function DataTable({
     });
   };
 
-  /* ----- Export CSV ----- */
-  const exportCsv = (only?: string[]) => {
+  /* ----- Export (Excel / PDF / CSV, en-tête Moov'Up) ----- */
+  const doExport = async (format: ExportFormat, only?: string[]) => {
     const cols = visible.filter((c) => !c.noExport && !c.srOnly);
     const list = only ? sorted.filter((r) => only.includes(r.id)) : sorted;
-    const lines = [cols.map((c) => csvCell(c.label)).join(";"), ...list.map((r) => cols.map((c) => csvCell(exportValue(r, c.key))).join(";"))];
-    const blob = new Blob(["﻿" + lines.join("\r\n") + "\r\n"], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${exportName ?? id}_${dayKey()}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    say(`${list.length} ligne${list.length > 1 ? "s" : ""} exportée${list.length > 1 ? "s" : ""}`);
+    const filters = exportFilters ? [...exportFilters] : urlFilters(sp, [sortParam, orderParam]);
+    if (only) filters.push({ label: "Sélection", value: `${list.length} ligne${list.length > 1 ? "s" : ""} cochée${list.length > 1 ? "s" : ""}` });
+    if (sortCol) filters.push({ label: "Tri", value: `${sortCol.label} (${dir === "asc" ? "croissant" : "décroissant"})` });
+    await exportTable({
+      format,
+      title: exportTitle ?? pageTitle() ?? exportName ?? id,
+      fileName: exportName ?? id,
+      filters,
+      columns: cols.map((c) => ({ key: c.key, label: c.label, numeric: !!c.numeric, kind: c.exportKind })),
+      rows: list.map((r) => Object.fromEntries(cols.map((c) => [c.key, exportValue(r, c.key)]))),
+    });
   };
 
   /* ----- Ligne cliquable ----- */
@@ -218,9 +229,7 @@ export function DataTable({
                 </button>
               );
             })}
-            <button type="button" onClick={() => exportCsv(selected)} className={buttonClass("secondary", "h-8 px-2.5")}>
-              <Download /> Exporter
-            </button>
+            <ExportMenu onExport={(f) => doExport(f, selected)} compact title="Exporter la sélection (Excel, PDF ou CSV)" />
             <button type="button" onClick={() => setSel(new Set())} className={buttonClass("ghost", "h-8 px-2")} aria-label="Désélectionner tout">
               <X /> <span className="hidden sm:inline">Désélectionner</span>
             </button>
@@ -242,10 +251,7 @@ export function DataTable({
         <div className="flex items-center gap-1">
           {toolbar}
           {hideables.length > 0 && <ColumnsMenu columns={hideables} hidden={hidden} onChange={setHidden} onReset={() => writeStorage(storageKey, null)} />}
-          <button type="button" onClick={() => exportCsv()} disabled={!rows.length} className={buttonClass("ghost", "h-8 px-2.5")} title="Exporter la vue en CSV (colonnes visibles, lignes filtrées)">
-            <Download /> <span className="hidden sm:inline">CSV</span>
-            <span className="sr-only sm:hidden">Exporter en CSV</span>
-          </button>
+          <ExportMenu onExport={(f) => doExport(f)} disabled={!rows.length} variant="ghost" compact title="Exporter la vue : colonnes visibles, lignes filtrées (Excel, PDF ou CSV)" />
         </div>
       </div>
 
@@ -535,9 +541,41 @@ function nodeText(n: ReactNode): string {
   return "";
 }
 
-function csvCell(v: CellValue) {
-  if (v === null || v === undefined) return "";
-  let s = typeof v === "number" ? String(Math.round(v * 100) / 100).replace(".", ",") : typeof v === "boolean" ? (v ? "Oui" : "Non") : String(v);
-  if (typeof v === "string" && /^[=@]|^[+-](?![\d\s])/.test(s)) s = "'" + s; // pas de formule involontaire dans Excel
-  return /[;"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+/** Titre de la page (h1) pour l'en-tête d'export */
+function pageTitle(): string | null {
+  const h = document.querySelector("main h1, h1");
+  const txt = h?.textContent?.replace(/\s+/g, " ").trim();
+  return txt || null;
+}
+
+const PARAM_LABEL: Record<string, string> = {
+  q: "Recherche",
+  etab: "Établissement",
+  statut: "Statut",
+  status: "Statut",
+  periode: "Période",
+  du: "Du",
+  au: "Au",
+  mode: "Paiement",
+  type: "Type",
+  categorie: "Catégorie",
+  source: "Source",
+  etape: "Étape",
+  vue: "Vue",
+  onglet: "Onglet",
+  risque: "Risque",
+  mois: "Mois",
+};
+
+/** Filtres de l'URL → lignes lisibles de l'en-tête d'export */
+function urlFilters(sp: URLSearchParams, skip: string[]): ExportFilter[] {
+  const out: ExportFilter[] = [];
+  for (const [k, raw] of sp.entries()) {
+    const v = raw.trim();
+    if (!v || skip.includes(k) || k === "page" || k.startsWith("_")) continue;
+    const label = PARAM_LABEL[k] ?? k.charAt(0).toUpperCase() + k.slice(1).replace(/[_-]/g, " ");
+    const value = k === "etab" || k === "entity" ? (entity(v)?.short ?? v) : k === "q" ? `« ${v} »` : v.replace(/[_-]/g, " ");
+    out.push({ label, value });
+  }
+  return out;
 }

@@ -2,8 +2,9 @@ import type { Metadata, Viewport } from "next";
 import { cookies } from "next/headers";
 import { Inter, Montserrat, Noto_Sans_Arabic } from "next/font/google";
 import { LangProvider } from "@/lib/i18n/client";
-import { dir, type Lang } from "@/lib/i18n/core";
+import { dir, parseLang } from "@/lib/i18n/core";
 import "./globals.css";
+import "./tablet.css";
 
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
 const montserrat = Montserrat({ variable: "--font-montserrat", subsets: ["latin"], weight: ["600", "700", "800"] });
@@ -28,7 +29,7 @@ const THEME_SCRIPT = `(function(){try{var d=document.documentElement;if(d.datase
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const jar = await cookies();
-  const lang: Lang = jar.get("lang")?.value === "ar" ? "ar" : "fr";
+  const lang = parseLang(jar.get("lang")?.value);
   const t = jar.get("theme")?.value;
   const theme = t === "dark" || t === "system" ? t : "light";
   return (
@@ -36,7 +37,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       lang={lang}
       dir={dir(lang)}
       data-theme={theme}
-      className={theme === "dark" ? "dark" : undefined}
+      className={[theme === "dark" ? "dark" : "", jar.get("ui")?.value === "tablet" ? "tablet" : ""].filter(Boolean).join(" ") || undefined}
       style={theme === "dark" ? { colorScheme: "dark" } : undefined}
       suppressHydrationWarning
     >

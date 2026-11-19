@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Building2, CalendarDays, ChevronRight, CircleDollarSign, LogIn, Users } from "lucide-react";
-import { getScope } from "@/lib/auth";
+import { Building2, CalendarDays, ChevronRight, CircleDollarSign, LogIn, Plus, RotateCcw, Users } from "lucide-react";
+import { getProfile, getScope } from "@/lib/auth";
+import { loadEstablishments } from "@/lib/establishments";
+import { toggleEstablishment } from "@/actions/establishments";
+import { EntityMark } from "@/components/entity-icon";
 import { createClient } from "@/lib/supabase/server";
 import { monthKey } from "@/lib/data";
 import { KIND_LABEL, type EntityKind } from "@/lib/entities";
@@ -9,7 +12,7 @@ import type { Appointment, Contact, Lead, Sale, Subscription } from "@/lib/types
 import { addDaysKey, agadirToIso, dayKey, mad, madShort } from "@/lib/utils";
 import { setScope } from "../scope-actions";
 import { SolidTile } from "@/components/stat-tile";
-import { Badge, Card, PageHeader, tableClass } from "@/components/ui";
+import { Badge, Card, LinkButton, PageHeader, tableClass } from "@/components/ui";
 import { SubmitButton } from "@/components/submit-button";
 import { ListToolbar } from "@/components/list-toolbar";
 import { matchesQuery } from "@/lib/search-match";
@@ -28,7 +31,9 @@ async function openInCrm(id: string) {
 const SORTS = ["nom", "ca", "clients", "abonnes", "rdv", "prospects"] as const;
 
 export default async function EntitiesPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  const [sp, scope] = await Promise.all([searchParams, getScope()]);
+  const [sp, scope, me, all] = await Promise.all([searchParams, getScope(), getProfile(), loadEstablishments()]);
+  const isDirection = me.role === "direction";
+  const inactive = isDirection ? all.filter((e) => e.active === false) : [];
   const ids = scope.allowed.map((e) => e.id);
   const supabase = await createClient();
   const today = dayKey();
@@ -81,7 +86,17 @@ export default async function EntitiesPage({ searchParams }: { searchParams: Pro
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Établissements" subtitle={`Le groupe Moov'Up à Agadir · ${scope.allowed.length} établissement${scope.allowed.length > 1 ? "s" : ""}`} />
+      <PageHeader
+        title="Établissements"
+        subtitle={`Le groupe Moov'Up à Agadir · ${scope.allowed.length} établissement${scope.allowed.length > 1 ? "s" : ""}`}
+        actions={
+          isDirection ? (
+            <LinkButton href="/etablissements/nouveau" variant="brand">
+              <Plus /> Ajouter un établissement
+            </LinkButton>
+          ) : undefined
+        }
+      />
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4 [&>*]:min-w-0">
         <SolidTile label="Établissements" value={scope.allowed.length} sub={[...new Set(scope.allowed.map((e) => KIND_LABEL[e.kind]))].join(" · ")} icon={<Building2 />} />
@@ -186,6 +201,30 @@ export default async function EntitiesPage({ searchParams }: { searchParams: Pro
           ))}
         </ul>
       </Card>
+
+      {inactive.length > 0 && (
+        <details className="group rounded-xl border border-line bg-white">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-3 text-sm font-semibold text-ink [&::-webkit-details-marker]:hidden">
+            Établissements désactivés
+            <span className="text-xs font-normal tabular-nums text-muted">{inactive.length}</span>
+          </summary>
+          <ul className="divide-y divide-line border-t border-line">
+            {inactive.map((e) => (
+              <li key={e.id} className="flex items-center gap-3 px-5 py-2.5">
+                <EntityMark id={e.id} size={30} />
+                <Link href={`/etablissements/${e.id}`} className="min-w-0 flex-1 truncate text-sm font-medium text-slate-600 hover:text-brand-600">
+                  {e.name}
+                </Link>
+                <form action={toggleEstablishment.bind(null, e.id)}>
+                  <SubmitButton variant="secondary" pendingText="Réactivation…" className="h-8 px-2.5">
+                    <RotateCcw /> Réactiver
+                  </SubmitButton>
+                </form>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </div>
   );
 }

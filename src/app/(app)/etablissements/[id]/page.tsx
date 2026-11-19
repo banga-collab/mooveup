@@ -1,14 +1,17 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { CalendarDays, CircleDollarSign, CreditCard, Filter, LogIn, Phone, Users } from "lucide-react";
-import { getScope } from "@/lib/auth";
+import { CalendarDays, CircleDollarSign, CreditCard, Filter, LogIn, MapPin, Pencil, Phone, PowerOff, RotateCcw, Users } from "lucide-react";
+import { getProfile, getScope } from "@/lib/auth";
+import { loadEstablishments } from "@/lib/establishments";
+import { toggleEstablishment } from "@/actions/establishments";
+import { ConfirmButton } from "@/components/confirm-button";
 import { createClient } from "@/lib/supabase/server";
 import { byId, lastMonths, monthKey } from "@/lib/data";
 import { KIND_LABEL } from "@/lib/entities";
 import type { Appointment, CatalogItem, CatalogKind, Contact, Lead, Profile, Sale, Subscription } from "@/lib/types";
 import { APPT_STATUS_LABEL, CATALOG_KIND_LABEL, CONTACT_STATUS_LABEL, ROLE_LABEL, addDaysKey, agadirToIso, dayKey, fmtDate, fmtTime, mad, madShort } from "@/lib/utils";
 import { setScope } from "../../scope-actions";
-import { Avatar, Badge, Card, CardHeader, Empty, PageHeader } from "@/components/ui";
+import { Avatar, Badge, Card, CardHeader, Empty, LinkButton, PageHeader } from "@/components/ui";
 import { SolidTile } from "@/components/stat-tile";
 import { BackLink } from "@/components/back-link";
 import { EntityMark } from "@/components/entity-icon";
@@ -28,8 +31,9 @@ const KINDS: CatalogKind[] = ["abonnement", "prestation", "pack", "produit"];
 const link = "text-[13px] font-medium text-brand-600 hover:underline";
 
 export default async function EntityPage({ params }: { params: Promise<{ id: string }> }) {
-  const [{ id }, scope] = await Promise.all([params, getScope()]);
-  const e = scope.allowed.find((x) => x.id === id);
+  const [{ id }, scope, me, all] = await Promise.all([params, getScope(), getProfile(), loadEstablishments()]);
+  const isDirection = me.role === "direction";
+  const e = scope.allowed.find((x) => x.id === id) ?? (isDirection ? all.find((x) => x.id === id) : undefined);
   if (!e) notFound();
   const supabase = await createClient();
   const today = dayKey();
@@ -76,19 +80,55 @@ export default async function EntityPage({ params }: { params: Promise<{ id: str
             <span className="min-w-0">{e.name}</span>
           </span>
         }
-        subtitle={`${KIND_LABEL[e.kind]} · public ${e.audience.toLowerCase()} · ${e.tagline}`}
+        subtitle={
+          <>
+            {[KIND_LABEL[e.kind], `public ${e.audience.toLowerCase()}`, e.tagline].filter(Boolean).join(" · ")}
+            {(e.address || e.phone) && (
+              <span className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted">
+                {e.address && (
+                  <span className="inline-flex items-center gap-1.5">
+                    <MapPin className="size-3.5 text-slate-400" /> {e.address}
+                  </span>
+                )}
+                {e.phone && (
+                  <a href={`tel:${e.phone.replace(/\s/g, "")}`} className="inline-flex items-center gap-1.5 hover:text-brand-600">
+                    <Phone className="size-3.5 text-slate-400" /> {e.phone}
+                  </a>
+                )}
+              </span>
+            )}
+          </>
+        }
         actions={
-          isCurrent ? (
-            <Badge tone="brand" dot>
-              Affiché dans le CRM
-            </Badge>
-          ) : (
-            <form action={openInCrm.bind(null, e.id)}>
-              <SubmitButton variant="brand" pendingText="Ouverture…">
-                <LogIn /> Ouvrir dans le CRM
-              </SubmitButton>
-            </form>
-          )
+          <>
+            {isDirection && (
+              <LinkButton href={`/etablissements/${e.id}/modifier`} variant="secondary">
+                <Pencil /> Modifier
+              </LinkButton>
+            )}
+            {e.active === false ? (
+              <>
+                <Badge tone="gray" dot>
+                  Désactivé
+                </Badge>
+                <form action={toggleEstablishment.bind(null, e.id)}>
+                  <SubmitButton variant="brand" pendingText="Réactivation…">
+                    <RotateCcw /> Réactiver
+                  </SubmitButton>
+                </form>
+              </>
+            ) : isCurrent ? (
+              <Badge tone="brand" dot>
+                Affiché dans le CRM
+              </Badge>
+            ) : (
+              <form action={openInCrm.bind(null, e.id)}>
+                <SubmitButton variant="brand" pendingText="Ouverture…">
+                  <LogIn /> Ouvrir dans le CRM
+                </SubmitButton>
+              </form>
+            )}
+          </>
         }
       />
 
@@ -247,6 +287,20 @@ export default async function EntityPage({ params }: { params: Promise<{ id: str
           )}
         </Card>
       </div>
+
+      {isDirection && e.active !== false && all.filter((x) => x.active !== false).length > 1 && (
+        <details className="rounded-xl border border-line bg-white">
+          <summary className="cursor-pointer list-none px-5 py-3 text-[13px] font-medium text-muted hover:text-ink [&::-webkit-details-marker]:hidden">Désactiver cet établissement</summary>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-5 py-4">
+            <p className="max-w-xl text-[13px] text-muted">Il disparaît des sélecteurs, de la caisse et des listes. Les clients, ventes et stocks sont conservés ; vous pourrez le réactiver à tout moment.</p>
+            <form action={toggleEstablishment.bind(null, e.id)}>
+              <ConfirmButton message={`Désactiver ${e.short} ? Ses données sont conservées.`} className="h-9">
+                <PowerOff className="size-4" /> Désactiver
+              </ConfirmButton>
+            </form>
+          </div>
+        </details>
+      )}
     </div>
   );
 }

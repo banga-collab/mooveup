@@ -3,7 +3,7 @@ import { ArrowLeftRight, X } from "lucide-react";
 import { entity } from "@/lib/entities";
 import { cn, fmtDate, fmtTime } from "@/lib/utils";
 import type { Profile } from "@/lib/types";
-import { MOVEMENT_KIND_LABEL, MOVEMENT_REASON_LABEL, type StockMovement } from "@/lib/types-ops";
+import { MOVEMENT_KIND_LABEL, type StockMovement } from "@/lib/types-ops";
 import { addMovement } from "@/actions/stock";
 import { ActionForm } from "@/components/action-form";
 import { SubmitButton } from "@/components/submit-button";
@@ -15,7 +15,7 @@ import { matchesQuery } from "@/lib/search-match";
 import { one } from "@/components/data-table/match";
 import { clearHref, entityFilter } from "@/components/reports/list-kit";
 import { EntityBadge } from "@/components/entity-icon";
-import type { ProductRow } from "./lib";
+import { reasonLabel, type ProductRow } from "./lib";
 
 export const PERIODS = [
   { id: "7", label: "7 jours" },
@@ -74,19 +74,19 @@ export function MovementsTab({
   const fType = one(sp.type);
   const fEtab = one(sp.etab);
   const who = (m: StockMovement) => (m.author_id && people.get(m.author_id)?.full_name) || "";
-  const typeOf = (m: StockMovement) => (m.reason === "perte" ? "perte" : m.kind);
+  const typeOf = (m: StockMovement) => (m.reason === "perte" ? "perte" : (m.reason as string) === "transfert" ? "transfert" : m.kind);
   const entityIds = [...new Set(rows.map((r) => r.item.entity_id))];
   const moves = all.filter(
     (m) =>
       (!fType || typeOf(m) === fType) &&
       (!fEtab || m.entity_id === fEtab) &&
-      matchesQuery(q, items.get(m.item_id)?.name, items.get(m.item_id)?.category, m.note, who(m), MOVEMENT_REASON_LABEL[m.reason], MOVEMENT_KIND_LABEL[m.kind]),
+      matchesQuery(q, items.get(m.item_id)?.name, items.get(m.item_id)?.category, m.note, who(m), reasonLabel(m.reason), MOVEMENT_KIND_LABEL[m.kind]),
   );
   const filtered = FILTERS.some((k) => !!one(sp[k]));
   const productName = product ? items.get(product)?.name : null;
   const tableRows: DataRow[] = moves.map((m) => {
     const it = items.get(m.item_id);
-    const label = m.kind === "ajustement" || m.reason === "perte" ? MOVEMENT_REASON_LABEL[m.reason] : `${MOVEMENT_KIND_LABEL[m.kind]} · ${MOVEMENT_REASON_LABEL[m.reason].toLowerCase()}`;
+    const label = m.kind === "ajustement" || m.reason === "perte" ? reasonLabel(m.reason) : `${MOVEMENT_KIND_LABEL[m.kind]} · ${reasonLabel(m.reason).toLowerCase()}`;
     return {
       id: m.id,
       cells: {
@@ -106,7 +106,7 @@ export function MovementsTab({
             </span>
           </span>
         ),
-        type: <Badge tone={m.kind === "entree" ? "green" : m.kind === "sortie" ? (m.reason === "perte" ? "red" : "gray") : "brand"}>{label}</Badge>,
+        type: <Badge tone={typeOf(m) === "transfert" ? "brand" : m.kind === "entree" ? "green" : m.kind === "sortie" ? (m.reason === "perte" ? "red" : "gray") : "brand"}>{label}</Badge>,
         qty: (
           <span className={cn("font-semibold tabular-nums", m.qty > 0 ? "text-emerald-600" : "text-ink")}>
             {m.qty > 0 ? "+" : ""}
@@ -168,6 +168,7 @@ export function MovementsTab({
                   { value: "entree", label: "Entrées", count: all.filter((m) => typeOf(m) === "entree").length },
                   { value: "sortie", label: "Sorties", count: all.filter((m) => typeOf(m) === "sortie").length },
                   { value: "perte", label: "Pertes", count: all.filter((m) => typeOf(m) === "perte").length },
+                  { value: "transfert", label: "Transferts", count: all.filter((m) => typeOf(m) === "transfert").length },
                   { value: "ajustement", label: "Ajustements", count: all.filter((m) => typeOf(m) === "ajustement").length },
                 ],
               },

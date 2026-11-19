@@ -23,7 +23,7 @@ export type NotificationRead = {
   read_at: string;
 };
 
-export type NotificationKind = "rdv" | "stock" | "caisse" | "abonnement" | "impaye" | "avis" | "tache" | "reservation" | "prospect";
+export type NotificationKind = "rdv" | "stock" | "caisse" | "abonnement" | "impaye" | "avis" | "tache" | "reservation" | "prospect" | "reclamation";
 
 export type AppNotification = {
   key: string;

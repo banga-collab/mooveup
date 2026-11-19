@@ -92,7 +92,10 @@ export function OnboardingBanner() {
     if (!home) return;
     const h = readLocal<boolean>(HIDDEN, false);
     setHidden(h);
-    if (!h) getOnboarding().then(setRaw, () => {});
+    if (h) return;
+    // Différé : la page d'accueil s'affiche d'abord
+    const id = window.setTimeout(() => getOnboarding().then(setRaw, () => {}), 1500);
+    return () => window.clearTimeout(id);
   }, [home]);
 
   if (!home || hidden || !steps) return null;

@@ -76,7 +76,7 @@ export type StockSetting = {
 };
 
 export type MovementKind = "entree" | "sortie" | "ajustement";
-export type MovementReason = "vente" | "remboursement" | "reception" | "inventaire" | "manuel" | "perte";
+export type MovementReason = "vente" | "remboursement" | "reception" | "inventaire" | "manuel" | "perte" | "transfert";
 
 export type StockMovement = {
   id: string;
@@ -123,6 +123,7 @@ export const MOVEMENT_REASON_LABEL: Record<MovementReason, string> = {
   inventaire: "Inventaire",
   manuel: "Saisie manuelle",
   perte: "Perte / casse",
+  transfert: "Transfert",
 };
 export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = { brouillon: "Brouillon", envoyee: "Envoyée", recue: "Reçue" };
 export const BASIS_LABEL: Record<CommissionBasis, string> = { prestations: "Prestations réalisées", produits: "Ventes de produits" };

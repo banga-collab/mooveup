@@ -7,6 +7,7 @@ import { useT } from "@/lib/i18n/client";
 import { Kbd } from "@/components/ui";
 import { SHORTCUTS, isTyping, keyOf, type Shortcut } from "./shortcuts";
 import { setFlag } from "./prefs";
+import { startNavProgress } from "./nav-progress";
 
 /** Écouteur global des raccourcis clavier + fenêtre d'aide (« ? ») */
 export function ShortcutsListener() {
@@ -17,7 +18,10 @@ export function ShortcutsListener() {
   useEffect(() => {
     const run = (s: Shortcut) => {
       if (s.event) window.dispatchEvent(new Event(s.event));
-      else if (s.href) router.push(s.href);
+      else if (s.href) {
+        if (s.href.split("#")[0] !== window.location.pathname) startNavProgress();
+        router.push(s.href);
+      }
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.repeat || isTyping(e.target)) return;

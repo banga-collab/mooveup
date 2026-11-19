@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { Ban, CalendarDays, CalendarPlus, ChevronLeft, ChevronRight, DoorOpen, Phone, Repeat, SearchX, StickyNote, UserRound, Zap } from "lucide-react";
+import { Ban, CalendarDays, CalendarPlus, CircleDollarSign, DoorOpen, Phone, Repeat, SearchX, StickyNote, UserCheck, UserRound, UserX, Zap } from "lucide-react";
 import { getScope } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { byId, getTeam } from "@/lib/data";
@@ -8,13 +8,19 @@ import { APPT_STATUS_LABEL, addDaysKey, agadirToIso, cn, dayKey, fmtTime, mad, m
 import type { AppointmentStatus, Contact } from "@/lib/types";
 import type { AppointmentSeries, SeriesAppointment } from "@/lib/types-agenda";
 import { REPEAT_LABEL } from "@/lib/types-agenda";
-import { Avatar, Card, DescList, Empty, Input, LinkButton, PageHeader, Segmented, buttonClass } from "@/components/ui";
+import { Avatar, Card, DescList, Empty, LinkButton } from "@/components/ui";
 import { EntityBadge, EntityMark } from "@/components/entity-icon";
-import { ListToolbar, type FilterGroup } from "@/components/list-toolbar";
+import { entity } from "@/lib/entities";
+import { KpiStrip, type KpiItem } from "@/components/kpi-strip";
+import { TabletAction } from "@/components/tablet/dock";
+import { AgendaBar, type BarDay, type BarSelect } from "@/components/agenda/agenda-bar";
 import { ContactLink } from "@/components/quick-view/contact-link";
 import { AppointmentActions, ApptStatusScope, LiveStatusBadge } from "@/components/agenda/appointment-actions";
 import { TimeGrid, type GridAppt, type GridColumn } from "@/components/agenda/day-grid";
-import { matchText, minutesOf } from "@/components/agenda/recurrence";
+import { addMonthsKey, daysBetween, matchText, minutesOf } from "@/components/agenda/recurrence";
+import { MonthView } from "@/components/agenda/month-view";
+import { PeriodList, periodTotals } from "@/components/agenda/period-list";
+import { PeriodExport } from "@/components/agenda/period-export";
 import { Sheet } from "@/components/agenda/sheet";
 import { UndoToast } from "@/components/agenda/undo-toast";
 
@@ -23,17 +29,35 @@ export const metadata = { title: "Agenda" };
 const dayLabel = (key: string, opts: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("fr-FR", { ...opts, timeZone: "UTC" }).format(new Date(`${key}T12:00:00Z`));
 const STATUSES = Object.keys(APPT_STATUS_LABEL) as AppointmentStatus[];
 
-type SP = { date?: string; vue?: string; staff?: string; statut?: string; etab?: string; q?: string; sel?: string };
+type SP = { date?: string; vue?: string; staff?: string; statut?: string; etab?: string; q?: string; sel?: string; du?: string; au?: string };
+type View = "jour" | "semaine" | "mois" | "liste";
+const VIEWS: View[] = ["jour", "semaine", "mois", "liste"];
+const isKey = (s?: string): s is string => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s));
+/** Période maximale de la vue liste (jours) */
+const MAX_PERIOD = 92;
 
 export default async function AgendaPage({ searchParams }: { searchParams: Promise<SP> }) {
   const [sp, scope] = await Promise.all([searchParams, getScope()]);
   const supabase = await createClient();
   const today = dayKey();
-  const date = sp.date && /^\d{4}-\d{2}-\d{2}$/.test(sp.date) && !Number.isNaN(Date.parse(sp.date)) ? sp.date : today;
-  const view: "jour" | "semaine" = sp.vue === "semaine" ? "semaine" : "jour";
-  const dow = (new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7;
-  const monday = addDaysKey(date, -dow);
+  const date = isKey(sp.date) ? sp.date : today;
+  const view: View = VIEWS.includes(sp.vue as View) ? (sp.vue as View) : "jour";
+  const mondayOf = (d: string) => addDaysKey(d, -((new Date(`${d}T12:00:00Z`).getUTCDay() + 6) % 7));
+  const monday = mondayOf(date);
   const week = Array.from({ length: 7 }, (_, i) => addDaysKey(monday, i));
+  /* Mois (grille lun → dim, semaines complètes) */
+  const month = date.slice(0, 7);
+  const monthStart = `${month}-01`;
+  const monthEnd = addDaysKey(addMonthsKey(monthStart, 1), -1);
+  const gridStart = mondayOf(monthStart);
+  const gridDays = Array.from({ length: 7 * Math.ceil((daysBetween(gridStart, monthEnd) + 1) / 7) }, (_, i) => addDaysKey(gridStart, i));
+  /* Période (vue liste) : du … au inclus, par défaut la semaine affichée */
+  let du = isKey(sp.du) ? sp.du : monday;
+  let au = isKey(sp.au) ? sp.au : addDaysKey(monday, 6);
+  if (au < du) [du, au] = [au, du];
+  const clamped = daysBetween(du, au) >= MAX_PERIOD;
+  if (clamped) au = addDaysKey(du, MAX_PERIOD - 1);
+  const [from, to] = view === "mois" ? [gridStart, addDaysKey(gridDays.at(-1)!, 1)] : view === "liste" ? [du, addDaysKey(au, 1)] : [monday, addDaysKey(monday, 7)];
 
   /* Filtres */
   const team = await getTeam(scope);
@@ -47,8 +71,8 @@ export default async function AgendaPage({ searchParams }: { searchParams: Promi
     .from("appointments")
     .select("*")
     .in("entity_id", entityIds)
-    .gte("starts_at", agadirToIso(monday, "00:00"))
-    .lt("starts_at", agadirToIso(addDaysKey(monday, 7), "00:00"))
+    .gte("starts_at", agadirToIso(from, "00:00"))
+    .lt("starts_at", agadirToIso(to, "00:00"))
     .order("starts_at");
   const rawWeek = (weekRows ?? []) as SeriesAppointment[];
 
@@ -73,9 +97,11 @@ export default async function AgendaPage({ searchParams }: { searchParams: Promi
       (!staffFilter || (staffFilter === "aucun" ? !a.staff_id : a.staff_id === staffFilter)) &&
       matchText(q, a.contactName, a.service, contacts.get(a.contact_id)?.phone, a.staffName, a.room),
   );
+  /* Rendez-vous filtrés de la plage chargée (semaine, grille du mois ou période) */
   const weekAppts = statusFilter ? searched.filter((a) => a.status === statusFilter) : searched;
   const dayAppts = weekAppts.filter((a) => dayKey(a.starts_at) === date);
-  const scopeList = view === "jour" ? dayAppts : weekAppts;
+  const inMonth = (a: GridAppt) => dayKey(a.starts_at).startsWith(month);
+  const scopeList = view === "jour" ? dayAppts : view === "mois" ? weekAppts.filter(inMonth) : weekAppts;
   const filtered = !!(q || staffFilter || statusFilter || etab);
 
   /* Colonnes (vue jour) : praticiens du périmètre + ceux qui ont un RDV ce jour */
@@ -96,7 +122,7 @@ export default async function AgendaPage({ searchParams }: { searchParams: Promi
   /* Une recherche masque les praticiens sans résultat */
   if (q) dayColumns = dayColumns.filter((c) => dayAppts.some((a) => (a.staff_id ?? "none") === c.key));
 
-  /* Chiffres (jour ou semaine) */
+  /* Chiffres (jour, semaine, mois ou période) */
   const live = scopeList.filter((a) => a.status !== "annule");
   const welcomed = live.filter((a) => a.status === "arrive" || a.status === "termine");
   const absents = live.filter((a) => a.status === "absent");
@@ -114,11 +140,16 @@ export default async function AgendaPage({ searchParams }: { searchParams: Promi
   }
 
   /* Liens (conservent la vue et les filtres) */
-  const href = (o: { date?: string; vue?: "jour" | "semaine"; sel?: string | null }) => {
+  const href = (o: { date?: string; vue?: View; sel?: string | null; du?: string; au?: string }) => {
     const p = new URLSearchParams();
+    const v = o.vue ?? view;
     const d = o.date ?? date;
-    if (d !== today) p.set("date", d);
-    if ((o.vue ?? view) === "semaine") p.set("vue", "semaine");
+    if (d !== today && v !== "liste") p.set("date", d);
+    if (v !== "jour") p.set("vue", v);
+    if (v === "liste") {
+      p.set("du", o.du ?? du);
+      p.set("au", o.au ?? au);
+    }
     if (staffFilter) p.set("staff", staffFilter);
     if (statusFilter) p.set("statut", statusFilter);
     if (etab) p.set("etab", etab);
@@ -146,34 +177,80 @@ export default async function AgendaPage({ searchParams }: { searchParams: Promi
   }
   const newHref = `/agenda/nouveau?date=${date}${staffFilter && staffFilter !== "aucun" ? `&staff=${staffFilter}` : ""}`;
 
-  /* Filtres en puces (les compteurs portent sur le jour ou la semaine affichés) */
-  const inView = (a: GridAppt) => view === "semaine" || dayKey(a.starts_at) === date;
-  const filters: FilterGroup[] = [];
+  /* Listes déroulantes (les compteurs portent sur le jour ou la semaine affichés) */
+  const inView = (a: GridAppt) => (view === "jour" ? dayKey(a.starts_at) === date : view === "mois" ? inMonth(a) : true);
+  const selects: BarSelect[] = [];
   if (scope.ids.length > 1)
-    filters.push({
+    selects.push({
       param: "etab",
       label: "Tous les établissements",
+      value: etab,
       options: scope.allowed.filter((e) => scope.ids.includes(e.id)).map((e) => ({ value: e.id, label: e.short, count: etab && etab !== e.id ? undefined : all.filter((a) => inView(a) && a.entity_id === e.id).length })),
     });
   const staffChips = [...practitioners].sort((a, b) => a.full_name.localeCompare(b.full_name, "fr"));
   if (staffChips.length)
-    filters.push({
+    selects.push({
       param: "staff",
       label: "Tous les praticiens",
+      value: staffFilter,
       options: [...staffChips.map((p) => ({ value: p.id, label: p.full_name, count: all.filter((a) => inView(a) && a.staff_id === p.id).length })), { value: "aucun", label: "Sans praticien" }],
     });
-  filters.push({
+  selects.push({
     param: "statut",
     label: "Tous les statuts",
+    value: statusFilter,
     options: STATUSES.map((s) => ({ value: s, label: APPT_STATUS_LABEL[s], count: searched.filter((a) => inView(a) && a.status === s).length })),
   });
 
-  const clearHref = `/agenda${date !== today || view === "semaine" ? `?${new URLSearchParams({ ...(date !== today ? { date } : {}), ...(view === "semaine" ? { vue: "semaine" } : {}) }).toString()}` : ""}`;
+  const span = daysBetween(du, au) + 1;
+  const shift = (n: -1 | 1) =>
+    view === "mois"
+      ? href({ date: addMonthsKey(monthStart, n), sel: null })
+      : view === "liste"
+        ? href({ du: addDaysKey(du, n * span), au: addDaysKey(au, n * span), sel: null })
+        : href({ date: addDaysKey(date, n * (view === "semaine" ? 7 : 1)), sel: null });
+  const barWeek: BarDay[] = week.map((d) => ({
+    key: d,
+    wd: dayLabel(d, { weekday: "short" }).replace(".", ""),
+    num: Number(d.slice(8, 10)),
+    count: d >= from && d < to ? (perDay.get(d) ?? 0) : null,
+    href: href({ date: d, vue: "jour", sel: null }),
+    active: view === "jour" && d === date,
+    today: d === today,
+  }));
+  const showsToday = view === "jour" ? isToday : view === "semaine" ? week.includes(today) : view === "mois" ? today.startsWith(month) : false;
+  const nextMonth = addMonthsKey(`${today.slice(0, 7)}-01`, 1);
+  const periods = [
+    { label: "Cette semaine", du: mondayOf(today), au: addDaysKey(mondayOf(today), 6) },
+    { label: "Ce mois", du: `${today.slice(0, 7)}-01`, au: addDaysKey(nextMonth, -1) },
+    { label: "Mois prochain", du: nextMonth, au: addDaysKey(addMonthsKey(nextMonth, 1), -1) },
+    { label: "30 prochains jours", du: today, au: addDaysKey(today, 29) },
+  ].map((x) => ({ label: x.label, href: href({ vue: "liste", du: x.du, au: x.au, sel: null }), active: view === "liste" && du === x.du && au === x.au }));
+  const periodLabel = `${dayLabel(du, { day: "numeric", month: "short", ...(du.slice(0, 4) !== au.slice(0, 4) ? { year: "numeric" } : {}) })} – ${dayLabel(au, { day: "numeric", month: "short", year: "numeric" })}`;
+  const viewLabel = view === "semaine" ? "de la semaine" : view === "mois" ? "du mois" : view === "liste" ? "de la période" : isToday ? "aujourd'hui" : "du jour";
+  const kpis: KpiItem[] = [
+    {
+      label: `RDV ${viewLabel}`,
+      value: live.length,
+      sub: `${live.filter((a) => a.status === "confirme").length} confirmés · ${cancelled} annulé${cancelled > 1 ? "s" : ""}`,
+      icon: <CalendarDays />,
+    },
+    { label: "Accueillis", value: welcomed.length, sub: live.length ? `${pct(welcomed.length, live.length)} % · ${live.filter((a) => a.status === "arrive").length} sur place` : "—", icon: <UserCheck /> },
+    { label: "Absents", value: absents.length, sub: live.length ? `${pct(absents.length, live.length)} % des RDV` : "—", icon: <UserX />, alert: absents.length > 0 },
+    { label: "CA prévu", value: madShort(expected), sub: `Terminés : ${mad(doneRevenue)}`, icon: <CircleDollarSign /> },
+  ];
+
+  const clearQs = new URLSearchParams({
+    ...(date !== today && view !== "liste" ? { date } : {}),
+    ...(view !== "jour" ? { vue: view } : {}),
+    ...(view === "liste" ? { du, au } : {}),
+  }).toString();
+  const clearHref = `/agenda${clearQs ? `?${clearQs}` : ""}`;
   const empty = (
     <Card>
       <Empty
         icon={filtered ? <SearchX /> : <CalendarDays />}
-        title={filtered ? "Aucun rendez-vous ne correspond" : view === "jour" ? "Aucun rendez-vous ce jour" : "Aucun rendez-vous cette semaine"}
+        title={filtered ? "Aucun rendez-vous ne correspond" : view === "jour" ? "Aucun rendez-vous ce jour" : view === "semaine" ? "Aucun rendez-vous cette semaine" : view === "mois" ? "Aucun rendez-vous ce mois-ci" : "Aucun rendez-vous sur cette période"}
         text={filtered ? "Modifiez la recherche ou retirez des filtres." : "Ajoutez un rendez-vous ou choisissez une autre date."}
         action={
           filtered ? (
@@ -191,113 +268,99 @@ export default async function AgendaPage({ searchParams }: { searchParams: Promi
   );
 
   return (
-    <div className="space-y-5">
-      <PageHeader
-        title="Agenda"
-        subtitle={
-          <span className="inline-flex flex-wrap items-center gap-x-2">
-            <span className="capitalize">
-              {view === "jour" ? dayLabel(date, { weekday: "long", day: "numeric", month: "long", year: "numeric" }) : `Semaine du ${dayLabel(monday, { day: "numeric", month: "long" })}`}
-            </span>
-            <span className="text-slate-300">·</span>
-            {scope.current ? <EntityBadge id={scope.current.id} /> : <span>{scope.allowed.length} établissements</span>}
-          </span>
+    <div className="space-y-3">
+      <TabletAction href={newHref} label="Nouveau RDV" icon={<CalendarPlus />} />
+      {/* Titre + actions (compact) */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <h1 className="text-xl font-semibold tracking-tight text-ink">Agenda</h1>
+          <span className="truncate text-[13px] text-muted">{scope.current ? <EntityBadge id={scope.current.id} /> : `${scope.allowed.length} établissements`}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <LinkButton href="/express" variant="secondary" title="Client, rendez-vous ou abonnement et paiement en un seul écran">
+            <Zap /> <span className="hidden sm:inline">Accueil express</span>
+          </LinkButton>
+          <LinkButton href={newHref} variant="brand">
+            <CalendarPlus /> Nouveau rendez-vous
+          </LinkButton>
+        </div>
+      </div>
+
+      {/* Navigation, vue, recherche et filtres sur une ligne */}
+      <AgendaBar
+        view={view}
+        title={
+          view === "jour"
+            ? dayLabel(date, { weekday: "long", day: "numeric", month: "long" })
+            : view === "mois"
+              ? dayLabel(monthStart, { month: "long", year: "numeric" })
+              : view === "liste"
+                ? periodLabel
+                : `${dayLabel(monday, { day: "numeric", month: "short" })} – ${dayLabel(week[6]!, { day: "numeric", month: "short", year: "numeric" })}`
         }
-        actions={
-          <>
-            <LinkButton href="/express" variant="secondary" title="Client, rendez-vous ou abonnement et paiement en un seul écran">
-              <Zap /> Accueil express
-            </LinkButton>
-            <LinkButton href={newHref} variant="brand">
-              <CalendarPlus /> Nouveau rendez-vous
-            </LinkButton>
-          </>
-        }
+        date={date}
+        du={du}
+        au={au}
+        periods={periods}
+        prevHref={shift(-1)}
+        nextHref={shift(1)}
+        prevWeekHref={href({ date: addDaysKey(date, -7), sel: null })}
+        nextWeekHref={href({ date: addDaysKey(date, 7), sel: null })}
+        todayHref={showsToday ? null : href({ date: today, vue: view === "liste" ? "jour" : view, sel: null })}
+        tabs={[
+          { id: "jour", label: "Jour", href: href({ vue: "jour", date: view === "liste" ? du : date, sel: null }) },
+          { id: "semaine", label: "Semaine", href: href({ vue: "semaine", date: view === "liste" ? du : date, sel: null }) },
+          { id: "mois", label: "Mois", href: href({ vue: "mois", date: view === "liste" ? du : date, sel: null }) },
+          { id: "liste", label: "Liste", href: href({ vue: "liste", sel: null }) },
+        ]}
+        week={barWeek}
+        selects={selects}
       />
 
-      {/* Chiffres */}
-      <Card className="grid grid-cols-2 sm:grid-cols-4 sm:divide-x sm:divide-line [&>*]:min-w-0">
-        <DayStat
-          label={view === "semaine" ? "RDV de la semaine" : isToday ? "RDV aujourd'hui" : "RDV du jour"}
-          value={live.length}
-          sub={`${live.filter((a) => a.status === "confirme").length} confirmés · ${cancelled} annulé${cancelled > 1 ? "s" : ""}`}
-        />
-        <DayStat label="Accueillis" value={welcomed.length} sub={live.length ? `${pct(welcomed.length, live.length)} % · ${live.filter((a) => a.status === "arrive").length} sur place` : "—"} />
-        <DayStat label="Absents" value={absents.length} sub={live.length ? `${pct(absents.length, live.length)} % des RDV` : "—"} alert={absents.length > 0} />
-        <DayStat label="CA prévu" value={madShort(expected)} sub={`Terminés : ${mad(doneRevenue)}`} />
-      </Card>
+      {/* Chiffres : repliés par défaut (préférence mémorisée) */}
+      <KpiStrip id="agenda" defaultCollapsed items={kpis} />
 
-      {/* Navigation semaine + vue */}
-      <Card className="p-3 sm:p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-1">
-            <Link href={href({ date: addDaysKey(date, -7), sel: null })} aria-label="Semaine précédente" className={buttonClass("ghost", "w-9 px-0")}>
-              <ChevronLeft />
-            </Link>
-            <Link href={href({ date: addDaysKey(date, 7), sel: null })} aria-label="Semaine suivante" className={buttonClass("ghost", "w-9 px-0")}>
-              <ChevronRight />
-            </Link>
-            <p className="ml-1 text-sm font-semibold capitalize text-ink">
-              {dayLabel(monday, { day: "numeric", month: "short" })} – {dayLabel(week[6]!, { day: "numeric", month: "short", year: "numeric" })}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Segmented
-              active={view}
-              items={[
-                { id: "jour", href: href({ vue: "jour", sel: null }), label: "Jour" },
-                { id: "semaine", href: href({ vue: "semaine", sel: null }), label: "Semaine" },
-              ]}
-            />
-            <form action="/agenda" className="hidden items-center gap-2 lg:flex">
-              {view === "semaine" && <input type="hidden" name="vue" value="semaine" />}
-              {staffFilter && <input type="hidden" name="staff" value={staffFilter} />}
-              {statusFilter && <input type="hidden" name="statut" value={statusFilter} />}
-              {etab && <input type="hidden" name="etab" value={etab} />}
-              {q && <input type="hidden" name="q" value={q} />}
-              <Input type="date" name="date" defaultValue={date} aria-label="Aller à la date" className="h-9 w-auto" />
-              <button type="submit" className={buttonClass("secondary")}>
-                Aller
-              </button>
-            </form>
-            {!isToday && (
-              <Link href={href({ date: today, sel: null })} className={buttonClass("secondary")}>
-                Aujourd&apos;hui
-              </Link>
-            )}
-          </div>
-        </div>
-        <div className="mt-3 grid grid-cols-7 gap-1">
-          {week.map((d) => {
-            const n = perDay.get(d) ?? 0;
-            const active = view === "jour" && d === date;
-            const isNow = d === today;
-            return (
-              <Link
-                key={d}
-                href={href({ date: d, vue: "jour", sel: null })}
-                aria-current={active ? "date" : undefined}
-                className={cn(
-                  "flex min-w-0 flex-col items-center rounded-lg px-1 py-2 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40",
-                  active ? "bg-brand-500 text-white" : "text-slate-600 hover:bg-slate-50",
-                )}
-              >
-                <span className={cn("text-[11px] capitalize", active ? "text-white/80" : "text-muted")}>{dayLabel(d, { weekday: "short" }).replace(".", "")}</span>
-                <span className={cn("text-base font-semibold leading-tight tabular-nums sm:text-lg", isNow && !active && "text-accent-600")}>{Number(d.slice(8, 10))}</span>
-                <span className={cn("text-[11px] tabular-nums", active ? "text-white/80" : n ? "text-slate-500" : "text-slate-300")}>
-                  {n}
-                  <span className="hidden sm:inline"> RDV</span>
-                </span>
-              </Link>
-            );
-          })}
-        </div>
-      </Card>
+      {view === "liste" && clamped && <p className="text-[13px] text-amber-700">Période limitée à {MAX_PERIOD} jours : affichage jusqu&apos;au {dayLabel(au, { day: "numeric", month: "long", year: "numeric" })}.</p>}
 
-      {/* Recherche et filtres */}
-      <ListToolbar placeholder="Client, téléphone, prestation…" filters={filters} className="mb-0" />
-
-      {view === "jour" ? (
+      {view === "mois" ? (
+        <MonthView days={gridDays} month={month} today={today} appts={weekAppts} dayHref={(d) => href({ date: d, vue: "jour", sel: null })} />
+      ) : view === "liste" ? (
+        weekAppts.length === 0 ? (
+          empty
+        ) : (
+          <PeriodList
+            appts={weekAppts}
+            today={today}
+            selHref={(id) => href({ sel: id })}
+            dayHref={(d) => href({ date: d, vue: "jour", sel: null })}
+            toolbar={
+              <PeriodExport
+                title={`Agenda · ${periodLabel}`}
+                filters={[
+                  ...(etab ? [{ label: "Établissement", value: entity(etab)?.short ?? etab }] : []),
+                  ...(staffFilter ? [{ label: "Praticien", value: staffFilter === "aucun" ? "Sans praticien" : (people.get(staffFilter)?.full_name ?? "") }] : []),
+                  ...(statusFilter ? [{ label: "Statut", value: APPT_STATUS_LABEL[statusFilter] }] : []),
+                  ...(q ? [{ label: "Recherche", value: q }] : []),
+                ]}
+                rows={weekAppts.map((a) => ({
+                  date: dayLabel(dayKey(a.starts_at), { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" }),
+                  heure: fmtTime(a.starts_at),
+                  duree: a.duration_min,
+                  client: a.contactName,
+                  telephone: contacts.get(a.contact_id)?.phone ?? "",
+                  prestation: a.service,
+                  praticien: a.staffName ?? "",
+                  etablissement: entity(a.entity_id)?.short ?? "",
+                  salle: a.room ?? "",
+                  statut: APPT_STATUS_LABEL[a.status],
+                  prix: Number(a.price_mad),
+                }))}
+                totals={{ date: "Total", client: `${periodTotals(weekAppts).count} RDV`, prix: periodTotals(weekAppts).expected }}
+              />
+            }
+          />
+        )
+      ) : view === "jour" ? (
         dayAppts.length === 0 && (dayColumns.length === 0 || filtered) ? (
           empty
         ) : (
@@ -347,20 +410,10 @@ export default async function AgendaPage({ searchParams }: { searchParams: Promi
 
 function GridHelp({ week }: { week?: boolean }) {
   return (
-    <p className="mt-2 text-center text-xs text-muted">
+    <p className="mt-1.5 text-center text-[11.5px] text-muted" data-grid-help>
       Glissez un rendez-vous pour le déplacer{week ? " d'un jour à l'autre" : " (heure ou praticien)"}, tirez son bord inférieur pour changer la durée, cliquez sur un créneau libre pour en créer un.
       <span className="hidden lg:inline"> Au clavier : Alt + flèches.</span>
     </p>
-  );
-}
-
-function DayStat({ label, value, sub, alert }: { label: string; value: ReactNode; sub: string; alert?: boolean }) {
-  return (
-    <div className="px-4 py-3">
-      <p className="text-xs text-muted">{label}</p>
-      <p className={cn("mt-1 text-xl font-semibold tabular-nums", alert ? "text-red-600" : "text-ink")}>{value}</p>
-      <p className="truncate text-xs text-muted">{sub}</p>
-    </div>
   );
 }
 

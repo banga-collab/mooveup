@@ -28,9 +28,41 @@ const rnd = () => {
 const pick = <T,>(a: readonly T[]) => a[Math.floor(rnd() * a.length)]!;
 const int = (min: number, max: number) => min + Math.floor(rnd() * (max - min + 1));
 
-const today = () => dayKey();
-const day = (offset: number) => addDaysKey(today(), offset);
-const at = (offset: number, hhmm: string) => agadirToIso(day(offset), hhmm);
+/*
+ * Dates mémorisées : dayKey / agadirToIso passent par Intl (fuseau Africa/Casablanca), coûteux
+ * quand on génère des milliers de lignes. « Aujourd'hui » est calculé une fois par génération
+ * et chaque conversion n'est faite qu'une fois (la génération est ~5× plus rapide).
+ */
+let TODAY = dayKey();
+const dayMemo = new Map<number, string>();
+const isoMemo = new Map<string, string>();
+const addMemo = new Map<string, string>();
+const day = (offset: number) => {
+  let v = dayMemo.get(offset);
+  if (v === undefined) dayMemo.set(offset, (v = addDaysKey(TODAY, offset)));
+  return v;
+};
+/** Décalage horaire d'Agadir pour un jour donné (ms), calculé une fois par jour (heures ouvrées : pas de changement d'heure en journée) */
+const offsetMemo = new Map<string, number>();
+const toIso = (date: string, hhmm: string) => {
+  const k = `${date}T${hhmm}`;
+  let v = isoMemo.get(k);
+  if (v === undefined) {
+    let off = offsetMemo.get(date);
+    if (off === undefined) offsetMemo.set(date, (off = Date.parse(`${date}T12:00:00Z`) - Date.parse(agadirToIso(date, "12:00"))));
+    const [h = "9", m = "00"] = hhmm.split(":");
+    v = new Date(Date.parse(`${date}T${h.padStart(2, "0")}:${m.padStart(2, "0").slice(0, 2)}:00Z`) - off).toISOString();
+    isoMemo.set(k, v);
+  }
+  return v;
+};
+const addDays = (date: string, n: number) => {
+  const k = `${date}|${n}`;
+  let v = addMemo.get(k);
+  if (v === undefined) addMemo.set(k, (v = addDaysKey(date, n)));
+  return v;
+};
+const at = (offset: number, hhmm: string) => toIso(day(offset), hhmm);
 
 const FIRST_F = ["Salma", "Nadia", "Imane", "Leila", "Khadija", "Fatima Zahra", "Sara", "Hajar", "Meryem", "Asmae", "Ghita", "Nour", "Houda", "Zineb", "Yasmine", "Loubna", "Wiam", "Kawtar", "Rim", "Amal"];
 const FIRST_H = ["Karim", "Youssef", "Omar", "Mehdi", "Hamza", "Anas", "Reda", "Amine", "Ayoub", "Othmane", "Yassir", "Ilyas", "Soufiane", "Badr", "Nabil", "Adil", "Rachid", "Hicham", "Zakaria", "Ismail"];
@@ -126,6 +158,11 @@ const STAFF: [name: string, role: "staff" | "manager" | "reception", ents: Entit
 export function seed(): Record<string, Row[]> {
   seq = 100;
   state = 42;
+  TODAY = dayKey();
+  dayMemo.clear();
+  isoMemo.clear();
+  addMemo.clear();
+  offsetMemo.clear();
 
   const profiles: Row[] = [
     { id: DIRECTION, full_name: "Yassine Moov'Up", email: "direction@moovup.ma", role: "direction", entity_ids: [], job_title: "Directeur général", phone: "06 61 00 00 01", active: true, created_at: day(-400) },
@@ -166,7 +203,13 @@ export function seed(): Record<string, Row[]> {
       });
     }
   }
-  const itemsOf = (e: EntityId, kind?: string) => catalog_items.filter((i) => i.entity_id === e && (!kind || i.kind === kind));
+  const itemsMemo = new Map<string, Row[]>();
+  const itemsOf = (e: EntityId, kind?: string) => {
+    const k = `${e}|${kind ?? ""}`;
+    let v = itemsMemo.get(k);
+    if (!v) itemsMemo.set(k, (v = catalog_items.filter((i) => i.entity_id === e && (!kind || i.kind === kind))));
+    return v;
+  };
 
   /* Contacts : chaque établissement a sa clientèle, certains clients en fréquentent plusieurs */
   const contacts: Row[] = [];
@@ -212,7 +255,13 @@ export function seed(): Record<string, Row[]> {
       });
     }
   }
-  const byEntity = (e: EntityId) => contacts.filter((c) => c.entity_ids.includes(e) && c.status !== "prospect");
+  // Clientèle par établissement (calculée une fois : les prospects ajoutés plus bas n'en font pas partie)
+  const entityMemo = new Map<EntityId, Row[]>();
+  const byEntity = (e: EntityId) => {
+    let v = entityMemo.get(e);
+    if (!v) entityMemo.set(e, (v = contacts.filter((c) => c.entity_ids.includes(e) && c.status !== "prospect")));
+    return v;
+  };
 
   /* Abonnements (établissements sportifs + packs) */
   const subscriptions: Row[] = [];
@@ -224,7 +273,7 @@ export function seed(): Record<string, Row[]> {
       // Fin d'abonnement répartie : certains expirent bientôt, d'autres sont expirés
       const endOffset = c.status === "ancien" ? -int(20, 200) : int(-6, days);
       const end = day(endOffset);
-      const start = addDaysKey(end, -days);
+      const start = addDays(end, -days);
       subscriptions.push({
         id: uid(),
         contact_id: c.id,
@@ -261,7 +310,8 @@ export function seed(): Record<string, Row[]> {
 
   /* Rendez-vous (clinique, institut, barbier + coaching / terrain) : 45 jours passés, 10 à venir */
   const appointments: Row[] = [];
-  const rdvEntities: [EntityId, number][] = [["clinic", 5], ["institut", 9], ["evolve", 11], ["sports", 2], ["kids", 1]];
+  // Volumes réduits (~60 %) pour une génération rapide à chaque démarrage à froid (démo en ligne)
+  const rdvEntities: [EntityId, number][] = [["clinic", 3], ["institut", 5], ["evolve", 7], ["sports", 1], ["kids", 1]];
   const now = Date.now();
   for (const [eid, perDay] of rdvEntities) {
     const pool = byEntity(eid);
@@ -334,12 +384,12 @@ export function seed(): Record<string, Row[]> {
     let start = s.start_date as string;
     let first = true;
     while (start >= day(-215)) {
-      addSale(s.entity_id, s.contact_id, agadirToIso(start, `${int(9, 20)}:${pick(["05", "20", "40"])}`), [[{ id: s.item_id }, s.name, 1, s.price_mad]]);
+      addSale(s.entity_id, s.contact_id, toIso(start, `${int(9, 20)}:${pick(["05", "20", "40"])}`), [[{ id: s.item_id }, s.name, 1, s.price_mad]]);
       // Certains clients sont plus récents : on arrête l'historique
       if (!first && rnd() < 0.12) break;
       first = false;
       if (s.sessions_left !== null) break;
-      start = addDaysKey(start, -days);
+      start = addDays(start, -days);
     }
   }
   for (const a of appointments) {
@@ -347,7 +397,8 @@ export function seed(): Record<string, Row[]> {
     addSale(a.entity_id, a.contact_id, new Date(new Date(a.starts_at).getTime() + a.duration_min * 60000).toISOString(), [[{ id: a.item_id }, a.service, 1, a.price_mad]]);
   }
   // Historique prestations des mois précédents (clinique / institut / barbier)
-  for (const [eid, perMonth] of [["clinic", 110], ["institut", 230], ["evolve", 280], ["sports", 50], ["kids", 25]] as [EntityId, number][]) {
+  // Mêmes proportions que les rendez-vous ci-dessus (≈ rendez-vous terminés par mois), pour des courbes régulières
+  for (const [eid, perMonth] of [["clinic", 66], ["institut", 138], ["evolve", 170], ["sports", 25], ["kids", 25]] as [EntityId, number][]) {
     for (let m = 5; m >= 1; m--) {
       const n = Math.round(perMonth * (1 - m * 0.04) * (0.9 + rnd() * 0.2));
       for (let k = 0; k < n; k++) {

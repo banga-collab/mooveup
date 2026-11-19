@@ -12,6 +12,8 @@ import { seedShell } from "./shell";
 import { seedAgenda } from "./agenda";
 import { seedMember } from "./member";
 import { seedCorporate } from "./corporate";
+import { seedEstablishments } from "./establishments";
+import { seedBusiness } from "./business";
 
 type Row = Record<string, any>;
 export type SeedDB = Record<string, Row[]>;
@@ -31,6 +33,6 @@ export type SeedHelpers = {
 /** Ajoute les tables des modules. Chaque module peut aussi lire (sans le modifier) `db`. */
 export function extendSeed(db: SeedDB, h: SeedHelpers): SeedDB {
   const out: SeedDB = { settings: [] };
-  for (const fn of [seedFinance, seedLoyalty, seedAccess, seedCare, seedOps, seedShell, seedAgenda, seedMember, seedCorporate]) Object.assign(out, fn({ ...db, ...out }, h));
+  for (const fn of [seedFinance, seedLoyalty, seedAccess, seedCare, seedOps, seedShell, seedAgenda, seedMember, seedCorporate, seedEstablishments, seedBusiness]) Object.assign(out, fn({ ...db, ...out }, h));
   return out;
 }

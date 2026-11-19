@@ -1,8 +1,7 @@
 "use client";
 
-import { createContext, useContext } from "react";
+import { createContext, useCallback, useContext } from "react";
 import { t as translate, type Lang } from "./core";
-
 
 const LangContext = createContext<Lang>("fr");
 
@@ -14,7 +13,7 @@ export function LangProvider({ lang, children }: { lang: Lang; children: React.R
 /** const t = useT(); t("nav.caisse") */
 export function useT() {
   const lang = useContext(LangContext);
-  return (key: string, vars?: Record<string, string | number>) => translate(lang, key, vars);
+  return useCallback((key: string, vars?: Record<string, string | number>) => translate(lang, key, vars), [lang]);
 }
 
 export const useLang = () => useContext(LangContext);

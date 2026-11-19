@@ -29,7 +29,7 @@ export type GridColumn = {
 
 export const DAY_START = 8;
 export const DAY_END = 21;
-const HOUR_PX = 72;
+const HOUR_PX = 80;
 const PX = HOUR_PX / 60;
 const PAD = 8;
 const SNAP = 15;
@@ -57,14 +57,17 @@ const snap = (m: number) => Math.round(m / SNAP) * SNAP;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 /** Répartit les rendez-vous qui se chevauchent dans des couloirs côte à côte */
+type Laid = { a: GridAppt; s: number; lane: number; lanes: number; cluster: number };
 function layout(list: { a: GridAppt; s: number }[]) {
   const sorted = [...list].sort((x, y) => x.s - y.s);
-  const out: { a: GridAppt; s: number; lane: number; lanes: number }[] = [];
+  const out: Laid[] = [];
+  let clusterNo = 0;
   let cluster: typeof out = [];
   let laneEnds: number[] = [];
   let clusterEnd = -1;
   const flush = () => {
     cluster.forEach((c) => (c.lanes = laneEnds.length));
+    clusterNo++;
     out.push(...cluster);
     cluster = [];
     laneEnds = [];
@@ -77,7 +80,7 @@ function layout(list: { a: GridAppt; s: number }[]) {
       lane = laneEnds.length;
       laneEnds.push(e);
     } else laneEnds[lane] = e;
-    cluster.push({ a, s, lane, lanes: 1 });
+    cluster.push({ a, s, lane, lanes: 1, cluster: clusterNo });
     clusterEnd = Math.max(clusterEnd, e);
   }
   if (cluster.length) flush();
@@ -118,7 +121,11 @@ export function TimeGrid({
 
   const hours = Array.from({ length: DAY_END - DAY_START + 1 }, (_, i) => DAY_START + i);
   const height = (DAY_END - DAY_START) * HOUR_PX;
-  const minCol = mode === "day" ? 190 : 128;
+  /* Largeur minimale lisible : colonne de base, élargie quand des rendez-vous se chevauchent (vue jour) */
+  const BASE_COL = mode === "day" ? 210 : 150;
+  const LANE_W = 125;
+  /** Vue semaine : au-delà de 2 rendez-vous simultanés, un « +N » renvoie à la journée */
+  const WEEK_LANES = 2;
 
   const colOf = (a: { staff_id: string | null; starts_at: string }) => (mode === "day" ? (a.staff_id ?? NONE) : dayKey(a.starts_at));
   const meta = useMemo(() => new Map(list.map((a) => [a.id, { s: minutesOf(a.starts_at), date: dayKey(a.starts_at) }])), [list]);
@@ -132,6 +139,18 @@ export function TimeGrid({
     }
     return m;
   }, [list, meta, mode]);
+
+  const laid = useMemo(() => {
+    const m = new Map<string, Laid[]>();
+    for (const [k, arr] of byCol) m.set(k, layout(arr));
+    return m;
+  }, [byCol]);
+  const colWidth = (key: string) => {
+    if (mode === "week") return BASE_COL;
+    const lanes = Math.max(1, ...(laid.get(key) ?? []).map((x) => x.lanes));
+    return Math.max(BASE_COL, Math.min(lanes, 4) * LANE_W);
+  };
+  const totalWidth = 56 + columns.reduce((sum, c) => sum + colWidth(c.key), 0);
 
   const canDrag = (a: GridAppt) => a.status !== "termine" && a.status !== "annule";
   const selHref = (id: string) => `${hrefBase}${hrefBase.includes("?") ? "&" : "?"}sel=${id}`;
@@ -229,15 +248,18 @@ export function TimeGrid({
       if (d?.active) {
         const dy = d.y < 70 ? -12 : d.y > window.innerHeight - 70 ? 12 : 0;
         let dx = 0;
+        let sy = 0;
         const sc = scrollerRef.current;
         if (sc) {
           const r = sc.getBoundingClientRect();
           if (d.x < r.left + 50 && sc.scrollLeft > 0) dx = -12;
           else if (d.x > r.right - 50 && sc.scrollLeft < sc.scrollWidth - sc.clientWidth) dx = 12;
-          if (dx) sc.scrollBy(dx, 0);
+          if (d.y < r.top + 70 && sc.scrollTop > 0) sy = -12;
+          else if (d.y > r.bottom - 50 && sc.scrollTop < sc.scrollHeight - sc.clientHeight) sy = 12;
+          if (dx || sy) sc.scrollBy(dx, sy);
         }
-        if (dy) window.scrollBy(0, dy);
-        const moved = dx !== 0 || dy !== 0;
+        if (dy && !sy) window.scrollBy(0, dy);
+        const moved = dx !== 0 || dy !== 0 || sy !== 0;
         if (moved) impl.current.refresh();
       }
       raf = requestAnimationFrame(tick);
@@ -245,6 +267,18 @@ export function TimeGrid({
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [dragging]);
+
+  /* ---------- À l'ouverture : la grille se place sur l'heure actuelle (ou le premier rendez-vous) ---------- */
+  const firstMin = useMemo(() => (appts.length ? Math.min(...appts.map((a) => minutesOf(a.starts_at))) : null), [appts]);
+  const showsToday = columns.some((c) => c.date === today);
+  const firstDate = columns[0]?.date;
+  useEffect(() => {
+    const sc = scrollerRef.current;
+    if (!sc) return;
+    const target = showsToday && nowMin !== null && nowMin >= DAY_START * 60 && nowMin <= DAY_END * 60 ? nowMin - 45 : (firstMin ?? DAY_START * 60) - 20;
+    sc.scrollTop = Math.max(0, (target - DAY_START * 60) * PX);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstDate, mode]);
 
   /* ---------- Empêche le défilement tactile pendant un glisser ---------- */
   useEffect(() => {
@@ -378,36 +412,46 @@ export function TimeGrid({
   };
   const slotAt = (e: React.MouseEvent | RPointerEvent, key: string) => clamp(Math.floor(minuteAt(key, e.clientY) / SNAP) * SNAP, DAY_START * 60, DAY_END * 60 - SNAP);
 
+  const nowVisible = showsToday && nowMin !== null && nowMin >= DAY_START * 60 && nowMin <= DAY_END * 60;
+
   return (
-    <div ref={rootRef} className={cn("rounded-xl border border-line bg-white", dragging && "select-none")}>
-      <div ref={scrollerRef} className="overflow-x-auto">
-        <div className="min-w-full" style={{ width: `max(100%, ${56 + columns.length * minCol}px)` }}>
-          {/* En-têtes */}
-          <div className="flex border-b border-line bg-white">
-            <div className="w-14 shrink-0" />
+    <div ref={rootRef} className={cn("overflow-hidden rounded-xl border border-line bg-white", dragging && "select-none")} data-agenda-grid>
+      <div ref={scrollerRef} className="max-h-[max(440px,calc(100dvh-236px))] overflow-auto overscroll-contain" data-agenda-scroller>
+        <div className="min-w-full" style={{ width: `max(100%, ${totalWidth}px)` }}>
+          {/* En-têtes (collants en haut) */}
+          <div className="sticky top-0 z-20 flex border-b border-line bg-white">
+            <div className="sticky start-0 z-30 w-14 shrink-0 bg-white" />
             {columns.map((c) => {
               const n = (byCol.get(c.key) ?? []).filter(({ a }) => a.status !== "annule").length;
               const inner = (
                 <>
-                  {c.kind === "person" && <Avatar name={c.label} size={28} />}
+                  {c.kind === "person" && <Avatar name={c.label} size={30} />}
                   {c.kind === "none" && (
-                    <span className="grid size-7 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-400">
+                    <span className="grid size-[30px] shrink-0 place-items-center rounded-full bg-slate-100 text-slate-400">
                       <UserRound className="size-4" />
                     </span>
                   )}
+                  {c.kind === "day" && (
+                    <span className={cn("grid size-8 shrink-0 place-items-center rounded-full text-sm font-semibold tabular-nums", c.today ? "bg-accent-500 text-white" : "bg-slate-100 text-ink")}>
+                      {Number(c.date.slice(8, 10))}
+                    </span>
+                  )}
                   <div className="min-w-0 flex-1">
-                    <p className={cn("truncate text-[13px] font-medium capitalize", c.today ? "text-accent-600" : "text-ink")}>{c.label}</p>
-                    <p className="truncate text-[11px] text-muted">{c.sub ?? "—"}</p>
+                    <p className={cn("line-clamp-2 break-words text-[13px] font-semibold capitalize leading-tight", c.today ? "text-accent-600" : "text-ink")}>
+                      {c.kind === "day" ? c.label.replace(/\s*\d+$/, "") : c.label}
+                    </p>
+                    <p className="truncate text-[11.5px] text-muted">{c.sub ?? "—"}</p>
                   </div>
-                  <span className={cn("text-xs font-semibold tabular-nums", n ? "text-ink" : "text-slate-300")}>{n}</span>
+                  <span className={cn("rounded-md px-1.5 text-xs font-semibold tabular-nums", n ? "bg-slate-100 text-ink" : "text-slate-300")}>{n}</span>
                 </>
               );
+              const cls = "flex flex-1 items-center gap-2.5 border-s border-line px-3 py-2";
               return c.href ? (
-                <Link key={c.key} href={c.href} scroll={false} className="flex flex-1 items-center gap-2.5 border-l border-line px-3 py-2.5 transition hover:bg-slate-50" style={{ minWidth: minCol }} title="Voir la journée">
+                <Link key={c.key} href={c.href} scroll={false} className={cn(cls, "transition hover:bg-slate-50")} style={{ minWidth: colWidth(c.key) }} title={`Voir la journée · ${c.label}`}>
                   {inner}
                 </Link>
               ) : (
-                <div key={c.key} className="flex flex-1 items-center gap-2.5 border-l border-line px-3 py-2.5" style={{ minWidth: minCol }}>
+                <div key={c.key} className={cls} style={{ minWidth: colWidth(c.key) }} title={c.label}>
                   {inner}
                 </div>
               );
@@ -415,17 +459,26 @@ export function TimeGrid({
           </div>
 
           <div className="relative flex" style={{ height: height + 16 }}>
-            {/* Heures */}
-            <div className="relative w-14 shrink-0">
+            {/* Heures (collantes à gauche) */}
+            <div className="sticky start-0 z-10 w-14 shrink-0 bg-white">
               {hours.map((h) => (
-                <span key={h} className="absolute right-2 -translate-y-1/2 text-[11px] tabular-nums text-slate-400" style={{ top: (h - DAY_START) * HOUR_PX + PAD }}>
+                <span key={h} className="absolute end-2 -translate-y-1/2 text-[11px] tabular-nums text-slate-400" style={{ top: (h - DAY_START) * HOUR_PX + PAD }}>
                   {String(h).padStart(2, "0")}:00
                 </span>
               ))}
+              {nowVisible && (
+                <span
+                  className="absolute end-1 z-10 -translate-y-1/2 rounded bg-accent-500 px-1 py-px text-[10.5px] font-semibold tabular-nums text-white"
+                  style={{ top: ((nowMin ?? 0) - DAY_START * 60) * PX + PAD }}
+                  aria-label={`Il est ${hhmm(nowMin ?? 0)}`}
+                >
+                  {hhmm(nowMin ?? 0)}
+                </span>
+              )}
             </div>
 
             {/* Lignes horaires */}
-            <div className="pointer-events-none absolute inset-y-0 left-14 right-0">
+            <div className="pointer-events-none absolute inset-y-0 end-0 start-14">
               {hours.map((h) => (
                 <div key={h}>
                   <span className="absolute inset-x-0 border-t border-line" style={{ top: (h - DAY_START) * HOUR_PX + PAD }} />
@@ -436,7 +489,20 @@ export function TimeGrid({
 
             {/* Colonnes */}
             {columns.map((c) => {
-              const items = layout(byCol.get(c.key) ?? []);
+              const all = laid.get(c.key) ?? [];
+              /* Vue semaine : les grappes de plus de 2 rendez-vous simultanés sont résumées par « +N » */
+              const crowded = new Map<number, { start: number; end: number; hidden: number }>();
+              if (mode === "week") {
+                for (const x of all) {
+                  if (x.lanes <= WEEK_LANES) continue;
+                  const cl = crowded.get(x.cluster) ?? { start: Infinity, end: 0, hidden: 0 };
+                  cl.start = Math.min(cl.start, x.s);
+                  cl.end = Math.max(cl.end, x.s + x.a.duration_min);
+                  if (x.lane !== 0) cl.hidden++;
+                  crowded.set(x.cluster, cl);
+                }
+              }
+              const items = mode === "week" ? all.filter((x) => x.lanes <= WEEK_LANES || x.lane === 0) : all;
               const ghost = preview && preview.col === c.key ? preview : null;
               const hov = !dragging && hover?.col === c.key ? hover.min : null;
               const showNow = nowMin !== null && c.date === today && nowMin >= DAY_START * 60 && nowMin <= DAY_END * 60;
@@ -447,8 +513,8 @@ export function TimeGrid({
                     if (el) colEls.current.set(c.key, el);
                     else colEls.current.delete(c.key);
                   }}
-                  className={cn("relative flex-1 cursor-pointer border-l border-line", c.today && mode === "week" && "bg-accent-50/30")}
-                  style={{ minWidth: minCol }}
+                  className={cn("relative flex-1 cursor-pointer border-s border-line", c.today && mode === "week" && "bg-accent-50/30")}
+                  style={{ minWidth: colWidth(c.key) }}
                   onPointerMove={(e) => {
                     if (e.pointerType !== "mouse" || drag.current || e.target !== e.currentTarget) return;
                     const min = slotAt(e, c.key);
@@ -471,15 +537,16 @@ export function TimeGrid({
                   )}
 
                   {items.map(({ a, s, lane, lanes }) => {
+                    const shown = mode === "week" ? Math.min(lanes, WEEK_LANES) : lanes;
                     const e = entity(a.entity_id);
                     const top = Math.max(0, (s - DAY_START * 60) * PX) + PAD;
-                    const h = Math.max(26, a.duration_min * PX - 3);
+                    const h = Math.max(22, a.duration_min * PX - 3);
                     const end = new Date(new Date(a.starts_at).getTime() + a.duration_min * 60000).toISOString();
                     const off = a.status === "annule" || a.status === "absent";
                     const done = a.status === "termine";
-                    const tiny = h < 44;
                     const isDragged = preview?.id === a.id;
                     const movable = canDrag(a);
+                    const name = mode === "week" && shown > 1 ? shortName(a.contactName) : a.contactName;
                     return (
                       <Link
                         key={a.id}
@@ -491,9 +558,9 @@ export function TimeGrid({
                         onContextMenu={(ev) => drag.current && ev.preventDefault()}
                         onClick={(ev) => suppressClick.current && ev.preventDefault()}
                         onKeyDown={(ev) => onKey(ev, a)}
-                        title={`${fmtTime(a.starts_at)} – ${fmtTime(end)} · ${a.contactName} · ${a.service}${a.room ? ` · ${a.room}` : ""} · ${APPT_STATUS_LABEL[a.status]}${mode === "week" && a.staffName ? ` · ${a.staffName}` : ""}`}
+                        title={`${fmtTime(a.starts_at)} – ${fmtTime(end)} · ${a.contactName} · ${a.service}${a.room ? ` · ${a.room}` : ""} · ${APPT_STATUS_LABEL[a.status]}${a.staffName ? ` · ${a.staffName}` : ""}`}
                         className={cn(
-                          "group absolute overflow-hidden rounded-md border-l-[3px] px-2 py-1 text-left transition-[box-shadow,opacity] [-webkit-touch-callout:none] hover:z-10 hover:ring-1 hover:ring-slate-300 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50",
+                          "group absolute overflow-hidden rounded-md border-s-[3px] px-2 py-1 text-start leading-tight transition-[box-shadow,opacity] [-webkit-touch-callout:none] hover:z-10 hover:ring-1 hover:ring-slate-300 focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50",
                           movable ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
                           (done || !e) && "bg-slate-50",
                           off && "opacity-55",
@@ -502,38 +569,36 @@ export function TimeGrid({
                         style={{
                           top,
                           height: h,
-                          left: `calc(${(lane / lanes) * 100}% + 4px)`,
-                          width: `calc(${100 / lanes}% - 8px)`,
-                          borderLeftColor: e?.color ?? "#1a6d8e",
+                          insetInlineStart: `calc(${(lane / shown) * 100}% + 3px)`,
+                          width: `calc(${100 / shown}% - 6px)`,
+                          borderInlineStartColor: e?.color ?? "#1a6d8e",
                           ...(done || !e ? {} : { background: e.soft }),
                         }}
+                        data-appt
                       >
-                        <span className="flex items-center gap-1.5">
-                          <span className="text-[11px] font-medium tabular-nums text-slate-500">{fmtTime(a.starts_at)}</span>
-                          {tiny && <span className={cn("min-w-0 flex-1 truncate text-[12px] font-semibold text-ink", off && "line-through")}>{a.contactName}</span>}
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <span className="shrink-0 text-[11px] font-medium tabular-nums text-slate-500">{fmtTime(a.starts_at)}</span>
+                          <span className={cn("min-w-0 flex-1 truncate text-[12.5px] font-semibold text-ink", off && "line-through")}>{name}</span>
                           {a.series_id && <Repeat className="size-3 shrink-0 text-slate-400" aria-label="Série" />}
-                          <span className={cn("ml-auto size-2 shrink-0 rounded-full", APPT_TONE[a.status].dot)} />
+                          <span className={cn("size-2 shrink-0 rounded-full", APPT_TONE[a.status].dot)} />
                         </span>
-                        {!tiny && (
-                          <>
-                            <span className={cn("block truncate text-[13px] font-medium leading-tight text-ink", off && "line-through")}>{a.contactName}</span>
-                            <span className="flex items-center gap-1 truncate text-[11px] text-slate-600">
-                              <EntityIcon id={a.entity_id} className="size-3 shrink-0 text-slate-400" />
-                              <span className="truncate">{a.service}</span>
-                            </span>
-                            {mode === "week" && a.staffName && h >= 60 && (
-                              <span className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-muted">
-                                <UserRound className="size-3 shrink-0" />
-                                <span className="truncate">{a.staffName}</span>
-                              </span>
-                            )}
-                            {mode === "day" && a.room && h >= 70 && (
-                              <span className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-muted">
-                                <DoorOpen className="size-3 shrink-0" />
-                                {a.room}
-                              </span>
-                            )}
-                          </>
+                        {h >= 36 && (
+                          <span className="mt-0.5 flex min-w-0 items-start gap-1 text-[11.5px] text-slate-600">
+                            <EntityIcon id={a.entity_id} className="mt-px size-3 shrink-0 text-slate-400" />
+                            <span className={h >= 70 ? "line-clamp-2" : "truncate"}>{a.service}</span>
+                          </span>
+                        )}
+                        {mode === "week" && a.staffName && h >= 58 && (
+                          <span className="mt-0.5 flex min-w-0 items-center gap-1 text-[11px] text-muted">
+                            <UserRound className="size-3 shrink-0" />
+                            <span className="truncate">{a.staffName}</span>
+                          </span>
+                        )}
+                        {mode === "day" && a.room && h >= 58 && (
+                          <span className="mt-0.5 flex min-w-0 items-center gap-1 text-[11px] text-muted">
+                            <DoorOpen className="size-3 shrink-0" />
+                            <span className="truncate">{a.room}</span>
+                          </span>
                         )}
                         {movable && (
                           <span
@@ -541,6 +606,7 @@ export function TimeGrid({
                             onClick={(ev) => ev.preventDefault()}
                             className="absolute inset-x-0 bottom-0 flex h-2.5 cursor-ns-resize touch-none items-end justify-center opacity-0 transition group-hover:opacity-100"
                             aria-hidden
+                            data-resize-handle
                           >
                             <span className="mb-0.5 h-0.5 w-6 rounded-full bg-slate-400" />
                           </span>
@@ -548,6 +614,26 @@ export function TimeGrid({
                       </Link>
                     );
                   })}
+
+                  {/* Vue semaine : grappes chargées → « +N » vers la journée */}
+                  {[...crowded.entries()].map(([k, cl]) => (
+                    <Link
+                      key={`more-${k}`}
+                      href={c.href ?? hrefBase}
+                      scroll={false}
+                      className="absolute z-[1] flex flex-col items-center gap-0.5 rounded-md border border-dashed border-slate-300 bg-white/90 px-1 py-1 text-center text-[12px] font-semibold text-slate-600 transition hover:border-brand-300 hover:text-brand-700"
+                      style={{
+                        top: (cl.start - DAY_START * 60) * PX + PAD,
+                        height: Math.max(22, (cl.end - cl.start) * PX - 3),
+                        insetInlineStart: "calc(50% + 3px)",
+                        width: "calc(50% - 6px)",
+                      }}
+                      title="Voir tous les rendez-vous de la journée"
+                    >
+                      +{cl.hidden}
+                      <span className="text-[10.5px] font-normal text-muted">RDV</span>
+                    </Link>
+                  ))}
 
                   {/* Aperçu fantôme */}
                   {ghost && (
@@ -565,8 +651,8 @@ export function TimeGrid({
 
                   {showNow && (
                     <div className="pointer-events-none absolute inset-x-0 z-[5] flex items-center" style={{ top: ((nowMin ?? 0) - DAY_START * 60) * PX + PAD }}>
-                      <span className="size-2 -translate-x-1/2 rounded-full bg-accent-500" />
-                      <span className="h-px flex-1 bg-accent-500" />
+                      <span className="size-2 -translate-x-1/2 rounded-full bg-accent-500 rtl:translate-x-1/2" />
+                      <span className="h-0.5 flex-1 bg-accent-500/80" />
                     </div>
                   )}
                 </div>
@@ -577,4 +663,11 @@ export function TimeGrid({
       </div>
     </div>
   );
+}
+
+/** « Fatima Zahra Benali » → « Fatima B. » (colonnes étroites) */
+function shortName(full: string) {
+  const parts = full.trim().split(/\s+/);
+  if (parts.length < 2) return full;
+  return `${parts[0]} ${parts[parts.length - 1]![0]}.`;
 }

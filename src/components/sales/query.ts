@@ -1,10 +1,13 @@
 import type { Scope } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { byId } from "@/lib/data";
-import { entity, type EntityId } from "@/lib/entities";
+import { entity, isEntityId, type EntityId } from "@/lib/entities";
 import { PAY_LABEL, SALE_STATUS_LABEL, addDaysKey, agadirToIso, dayKey, mad } from "@/lib/utils";
 import type { Contact, PayMethod, Profile, Sale, SaleItem, SaleStatus } from "@/lib/types";
 import { matchesQuery } from "@/components/data-table/match";
+import { getSettings } from "@/lib/settings";
+import { loadEstablishments } from "@/lib/establishments";
+import type { TicketData } from "./pos-types";
 
 export type SalesPeriod = "today" | "7j" | "30j" | "mois" | "prev" | "annee" | "perso";
 export type SalesFilters = { du: string; au: string; periode: SalesPeriod; statut: SaleStatus | ""; mode: PayMethod | ""; etab: EntityId | ""; q: string };
@@ -60,7 +63,7 @@ export function readFilters(sp: Record<string, string | string[] | undefined>): 
   if (du > au) [du, au] = [au, du];
   const statut = STATUSES.includes(get("statut") as SaleStatus) ? (get("statut") as SaleStatus) : "";
   const mode = MODES.includes(get("mode") as PayMethod) ? (get("mode") as PayMethod) : "";
-  const etab = entity(get("etab")) ? (get("etab") as EntityId) : "";
+  const etab = isEntityId(get("etab")) ? (get("etab") as EntityId) : "";
   return { du, au, periode, statut, mode, etab, q: get("q").trim().slice(0, 80) };
 }
 
@@ -145,4 +148,50 @@ async function loadLines(supabase: Awaited<ReturnType<typeof createClient>>, ids
 /** « 2 x Séance hammam | Gommage » */
 export function linesLabel(lines: SaleItem[] | undefined) {
   return (lines ?? []).map((l) => (Number(l.qty) > 1 ? `${l.qty} x ${l.label}` : l.label)).join(" | ");
+}
+
+/** Données du ticket de caisse d'une vente (null si hors périmètre) */
+export async function loadTicket(saleId: string, extra: { cashier?: string; change?: number; tenderedCash?: number } = {}): Promise<TicketData | null> {
+  const supabase = await createClient();
+  const { data } = await supabase.from("sales").select("*").eq("id", saleId).maybeSingle();
+  const sale = data as Sale | null;
+  if (!sale) return null;
+  const [{ data: li }, { data: pay }, { data: c }, { data: seller }, settings, list] = await Promise.all([
+    supabase.from("sale_items").select("*").eq("sale_id", sale.id),
+    supabase.from("sale_payments").select("*").eq("sale_id", sale.id),
+    sale.contact_id ? supabase.from("contacts").select("*").eq("id", sale.contact_id).maybeSingle() : Promise.resolve({ data: null }),
+    !extra.cashier && sale.sold_by ? supabase.from("profiles").select("*").eq("id", sale.sold_by).maybeSingle() : Promise.resolve({ data: null }),
+    getSettings(),
+    loadEstablishments(),
+  ]);
+  const items = (li ?? []) as SaleItem[];
+  const payRows = (pay ?? []) as { method: PayMethod; amount_mad: number; tendered_mad: number | null }[];
+  const e = list.find((x) => x.id === sale.entity_id) ?? entity(sale.entity_id);
+  const lines = items.map((l) => ({ label: l.label, qty: Number(l.qty), unit_price: Number(l.unit_price_mad), total: Math.round(Number(l.qty) * Number(l.unit_price_mad) * 100) / 100 }));
+  const gross = lines.reduce((a, l) => a + l.total, 0);
+  const total = Number(sale.total_mad);
+  const paid = Number(sale.paid_mad);
+  const payments = payRows.length ? payRows.map((p) => ({ method: p.method, amount: Number(p.amount_mad) })) : paid > 0 ? [{ method: sale.method, amount: paid }] : [];
+  const cashRow = payRows.find((p) => p.method === "especes");
+  const tendered = extra.tenderedCash ?? (cashRow?.tendered_mad != null ? Number(cashRow.tendered_mad) : Number(cashRow?.amount_mad ?? 0));
+  const change = extra.change ?? Math.max(0, Math.round((tendered - Number(cashRow?.amount_mad ?? 0)) * 100) / 100);
+  return {
+    sale_id: sale.id,
+    number: sale.number,
+    sold_at: sale.sold_at,
+    company: { name: settings.company_name, address: settings.address, phone: settings.phone, ice: settings.ice, footer: settings.invoice_footer },
+    entity: { name: e?.name ?? sale.entity_id, address: e?.address ?? "", phone: e?.phone ?? "" },
+    cashier: extra.cashier ?? (seller as Profile | null)?.full_name ?? "",
+    client: (c as Contact | null)?.full_name ?? null,
+    lines,
+    gross: Math.round(gross * 100) / 100,
+    discount: Number(sale.discount_mad ?? Math.max(0, gross - total)),
+    total,
+    payments,
+    tendered_cash: tendered,
+    change,
+    paid,
+    rest: Math.max(0, Math.round((total - paid) * 100) / 100),
+    refunded: sale.status === "remboursee",
+  };
 }

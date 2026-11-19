@@ -5,6 +5,9 @@ import { redirect } from "next/navigation";
 import { getProfile, getScope } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { addDaysKey, dayKey, mad, parseNum, PAY_LABEL } from "@/lib/utils";
+import { entity } from "@/lib/entities";
+import type { PosPayment, TicketData } from "@/components/sales/pos-types";
+import { loadTicket } from "@/components/sales/query";
 import type { Appointment, CatalogItem, Contact, PayMethod, Sale, SaleItem, SaleStatus } from "@/lib/types";
 import type { FormState } from "@/components/action-form";
 import { onSaleCreated, onSaleRefunded } from "@/lib/hooks";
@@ -26,6 +29,21 @@ export type CheckoutInput = {
   paid: number | null;
   rdv_id: string | null;
   notes: string | null;
+  /** Caisse : paiement en plusieurs modes (remplace method / paid) */
+  payments?: PosPayment[];
+  /** Caisse : vérifier le stock disponible des produits */
+  check_stock?: boolean;
+  /** Caisse : vente confirmée malgré un stock insuffisant */
+  allow_short?: boolean;
+  /** Caisse : rester sur la caisse (renvoie le ticket au lieu de rediriger) */
+  stay?: boolean;
+};
+
+export type CheckoutResult = {
+  error?: string;
+  /** Produits en stock insuffisant (à confirmer) */
+  short?: { label: string; stock: number; qty: number }[];
+  ticket?: TicketData;
 };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -48,7 +66,7 @@ async function nextNumber(supabase: Awaited<ReturnType<typeof createClient>>, ye
 const fmtNumber = (year: string, n: number) => `MU-${year}-${String(n).padStart(5, "0")}`;
 
 /** Validation du panier de la caisse */
-export async function createSale(input: CheckoutInput): Promise<{ error?: string }> {
+export async function createSale(input: CheckoutInput): Promise<CheckoutResult> {
   const [profile, scope] = await Promise.all([getProfile(), getScope()]);
   const supabase = await createClient();
 
@@ -77,12 +95,53 @@ export async function createSale(input: CheckoutInput): Promise<{ error?: string
     if (!contact) return { error: "Client introuvable." };
   }
 
+  // Stock disponible (caisse)
+  const qtyByItem = new Map<string, number>();
+  for (const l of lines) if (l.item_id) qtyByItem.set(l.item_id, (qtyByItem.get(l.item_id) ?? 0) + l.qty);
+  if (input.check_stock && !input.allow_short) {
+    const short = [...qtyByItem]
+      .map(([id, qty]) => ({ it: items.get(id), qty }))
+      .filter(({ it, qty }) => it?.kind === "produit" && it.stock !== null && qty > Number(it.stock))
+      .map(({ it, qty }) => ({ label: it!.name, stock: Math.max(0, Number(it!.stock)), qty }));
+    if (short.length)
+      return {
+        error: `Stock insuffisant : ${short.map((x) => `${x.label} (${x.stock} disponible${x.stock > 1 ? "s" : ""}, ${x.qty} demandé${x.qty > 1 ? "s" : ""})`).join(", ")}.`,
+        short,
+      };
+  }
+
   // Montants
   const gross = round2(lines.reduce((a, l) => a + l.qty * l.unit_price, 0));
   const dv = Math.max(0, Number(input.discount_value) || 0);
   const discount = Math.min(gross, round2(input.discount_mode === "pct" ? (gross * Math.min(dv, 100)) / 100 : dv));
   const total = round2(gross - discount);
-  const paid = input.paid === null || input.paid === undefined ? total : Math.min(total, Math.max(0, round2(Number(input.paid) || 0)));
+
+  // Paiements : un seul mode (method / paid) ou paiement mixte (payments)
+  let method: PayMethod = input.method;
+  let paid: number;
+  let payRows: { method: PayMethod; amount: number; tendered: number | null }[] = [];
+  let change = 0;
+  let tenderedCash = 0;
+  if (input.payments?.length) {
+    const ps = input.payments
+      .map((p) => ({ method: p.method, amount: Math.max(0, round2(Number(p.amount) || 0)), tendered: p.tendered == null ? null : Math.max(0, round2(Number(p.tendered) || 0)) }))
+      .filter((p) => METHODS.includes(p.method) && (p.amount > 0 || (p.tendered ?? 0) > 0));
+    const nonCash = round2(ps.filter((p) => p.method !== "especes").reduce((a, p) => a + p.amount, 0));
+    if (nonCash > total + 0.001) return { error: "Les paiements par carte, virement ou chèque dépassent le total : seules les espèces donnent lieu à un rendu de monnaie." };
+    tenderedCash = round2(ps.filter((p) => p.method === "especes").reduce((a, p) => a + (p.tendered ?? p.amount), 0));
+    const cashNet = round2(Math.min(tenderedCash, total - nonCash));
+    change = round2(tenderedCash - cashNet);
+    paid = round2(nonCash + cashNet);
+    // Regroupe par mode ; espèces = montant net (après rendu de monnaie)
+    const by = new Map<PayMethod, number>();
+    for (const p of ps) if (p.method !== "especes") by.set(p.method, round2((by.get(p.method) ?? 0) + p.amount));
+    if (cashNet > 0) by.set("especes", cashNet);
+    payRows = [...by].map(([m, amount]) => ({ method: m, amount, tendered: m === "especes" ? tenderedCash : null }));
+    method = [...payRows].sort((a, b) => b.amount - a.amount)[0]?.method ?? input.method;
+  } else {
+    paid = input.paid === null || input.paid === undefined ? total : Math.min(total, Math.max(0, round2(Number(input.paid) || 0)));
+  }
+  if (!METHODS.includes(method)) return { error: "Mode de paiement inconnu." };
   if (paid < total && !contact) return { error: "Choisissez le client pour un paiement partiel ou à crédit." };
   const status = statusFor(total, paid);
 
@@ -109,7 +168,7 @@ export async function createSale(input: CheckoutInput): Promise<{ error?: string
         total_mad: total,
         discount_mad: discount,
         paid_mad: paid,
-        method: input.method,
+        method,
         status,
         sold_by: profile.id,
         sold_at: new Date().toISOString(),
@@ -124,10 +183,13 @@ export async function createSale(input: CheckoutInput): Promise<{ error?: string
   if (!sale) return { error: "Numéro de vente déjà utilisé, réessayez." };
 
   await supabase.from("sale_items").insert(lines.map((l) => ({ sale_id: sale!.id, item_id: l.item_id, label: l.label, qty: l.qty, unit_price_mad: l.unit_price })));
+  if (payRows.length) {
+    await supabase.from("sale_payments").insert(
+      payRows.map((p) => ({ sale_id: sale!.id, entity_id: input.entity_id, method: p.method, amount_mad: p.amount, tendered_mad: p.tendered, created_at: sale!.sold_at })),
+    );
+  }
 
-  // Stock des produits
-  const qtyByItem = new Map<string, number>();
-  for (const l of lines) if (l.item_id) qtyByItem.set(l.item_id, (qtyByItem.get(l.item_id) ?? 0) + l.qty);
+  // Stock des produits (le mouvement est enregistré par onSaleCreated → recordSaleStockOut)
   for (const [id, qty] of qtyByItem) {
     const it = items.get(id);
     if (it?.kind === "produit" && it.stock !== null) await supabase.from("catalog_items").update({ stock: Math.max(0, Number(it.stock) - qty) }).eq("id", id);
@@ -167,7 +229,7 @@ export async function createSale(input: CheckoutInput): Promise<{ error?: string
       entity_id: input.entity_id,
       kind: "vente",
       body:
-        `Vente ${sale.number} : ${labels} — ${mad(total)} (${PAY_LABEL[input.method]}${status === "payee" ? "" : `, reste ${mad(total - paid)}`})` +
+        `Vente ${sale.number} : ${labels} — ${mad(total)} (${payRows.length > 1 ? payRows.map((p) => `${PAY_LABEL[p.method]} ${mad(p.amount)}`).join(" + ") : PAY_LABEL[method]}${status === "payee" ? "" : `, reste ${mad(total - paid)}`})` +
         (created.length ? `. Abonnement activé : ${created.join(", ")}` : ""),
       author_id: profile.id,
     });
@@ -179,9 +241,104 @@ export async function createSale(input: CheckoutInput): Promise<{ error?: string
 
   revalidatePath("/ventes");
   revalidatePath("/caisse");
+  revalidatePath("/stock");
   revalidatePath("/");
+  if (input.stay) {
+    const ticket = await loadTicket(sale.id, { cashier: profile.full_name, change, tenderedCash });
+    return ticket ? { ticket } : {};
+  }
   await flash(`Vente ${sale.number} enregistrée`);
   redirect(`/ventes/${sale.id}?ok=1`);
+}
+
+/* ---------- Session de caisse (ouverture depuis la caisse) ---------- */
+
+/** Ouvre la caisse du jour d'un établissement avec le fond de caisse */
+export async function openRegister(entityId: string, floatValue: number): Promise<{ error?: string }> {
+  const [me, scope] = await Promise.all([getProfile(), getScope()]);
+  if (me.role === "staff") return { error: "L'ouverture de caisse est réservée à la réception, aux managers et à la direction." };
+  if (!scope.allowed.some((e) => e.id === entityId)) return { error: "Établissement non autorisé." };
+  const float = round2(Number(floatValue));
+  if (!Number.isFinite(float) || float < 0 || float > 100_000) return { error: "Indiquez le fond de caisse (0 si le tiroir est vide)." };
+  const supabase = await createClient();
+  const today = dayKey();
+  const { data: existing } = await supabase.from("cash_sessions").select("*").eq("entity_id", entityId).eq("day", today).maybeSingle();
+  if (existing) return { error: (existing as { status: string }).status === "cloturee" ? "La caisse de cet établissement est déjà clôturée aujourd'hui." : "La caisse est déjà ouverte." };
+  const { data, error } = await supabase
+    .from("cash_sessions")
+    .insert({
+      entity_id: entityId,
+      day: today,
+      status: "ouverte",
+      opening_float_mad: float,
+      opened_at: new Date().toISOString(),
+      opened_by: me.id,
+      closed_at: null,
+      closed_by: null,
+      expected_cash_mad: null,
+      counted_cash_mad: null,
+      difference_mad: null,
+      comment: null,
+      breakdown: null,
+      totals: null,
+    })
+    .select()
+    .single();
+  if (error || !data) return { error: "Impossible d'ouvrir la caisse. Réessayez." };
+  await logAudit({
+    action: "caisse.ouverture",
+    entity_id: entityId,
+    target_type: "cash_session",
+    target_id: (data as { id: string }).id,
+    summary: `Caisse ${entity(entityId)?.short ?? ""} ouverte avec un fond de ${mad(float)}`,
+    actor: me,
+    meta: { float },
+  });
+  await flash(`Caisse ouverte · fond de ${mad(float)}`);
+  revalidatePath("/caisse");
+  revalidatePath("/cloture");
+  return {};
+}
+
+/** Entrée (dépôt) ou sortie (retrait) d'espèces dans la caisse ouverte */
+export async function addCashMove(entityId: string, kind: "depot" | "retrait", amountValue: number, reasonValue: string): Promise<{ error?: string }> {
+  const [me, scope] = await Promise.all([getProfile(), getScope()]);
+  if (me.role === "staff") return { error: "Réservé à la réception, aux managers et à la direction." };
+  if (!scope.allowed.some((e) => e.id === entityId)) return { error: "Établissement non autorisé." };
+  if (kind !== "depot" && kind !== "retrait") return { error: "Choisissez dépôt ou retrait." };
+  const amount = round2(Number(amountValue));
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 100_000) return { error: "Indiquez un montant valide." };
+  const reason = String(reasonValue ?? "").trim().slice(0, 160);
+  if (kind === "retrait" && !reason) return { error: "Indiquez le motif du retrait." };
+  const supabase = await createClient();
+  const today = dayKey();
+  const { data } = await supabase.from("cash_sessions").select("*").eq("entity_id", entityId).eq("day", today).maybeSingle();
+  const session = data as { id: string; status: string } | null;
+  if (!session || session.status !== "ouverte") return { error: "Ouvrez d'abord la caisse du jour." };
+  const { error } = await supabase.from("cash_moves").insert({
+    entity_id: entityId,
+    session_id: session.id,
+    day: today,
+    kind,
+    amount_mad: amount,
+    reason: reason || "Dépôt d'espèces",
+    created_by: me.id,
+    created_at: new Date().toISOString(),
+  });
+  if (error) return { error: "Impossible d'enregistrer le mouvement de caisse." };
+  await logAudit({
+    action: kind === "depot" ? "caisse.depot" : "caisse.retrait",
+    entity_id: entityId,
+    target_type: "cash_session",
+    target_id: session.id,
+    summary: `${kind === "depot" ? "Dépôt" : "Retrait"} de ${mad(amount)} en caisse ${entity(entityId)?.short ?? ""}${reason ? ` : ${reason}` : ""}`,
+    actor: me,
+    meta: { amount, kind, reason },
+  });
+  await flash(`${kind === "depot" ? "Dépôt" : "Retrait"} de ${mad(amount)} enregistré`);
+  revalidatePath("/caisse");
+  revalidatePath("/cloture");
+  return {};
 }
 
 async function loadSale(id: string) {

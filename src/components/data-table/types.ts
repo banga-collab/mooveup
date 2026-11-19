@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
+import type { ExportKind } from "@/lib/export/types";
 
-/** Valeur brute d'une cellule (tri + export CSV) */
+/** Valeur brute d'une cellule (tri + export) */
 export type CellValue = string | number | boolean | null | undefined;
 
 export type DataColumn = {
@@ -17,8 +18,10 @@ export type DataColumn = {
   hideable?: boolean;
   /** Masquée par défaut */
   hidden?: boolean;
-  /** Exclue de l'export CSV (ex. colonne d'actions) */
+  /** Exclue de l'export (ex. colonne d'actions) */
   noExport?: boolean;
+  /** Format Excel de la colonne (money = MAD, int, num, pct, text) ; défaut : nombre si `numeric` */
+  exportKind?: ExportKind;
   /** Libellé visible uniquement pour les lecteurs d'écran (ex. « Actions ») */
   srOnly?: boolean;
   /** Classes de la cellule <td> */

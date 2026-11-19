@@ -4,14 +4,14 @@ import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { getProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
-import type { Lang } from "@/lib/i18n/core";
+import { parseLang, type Lang } from "@/lib/i18n/core";
 import type { OnboardingStep, SavedView } from "@/lib/types-shell";
 
 const YEAR = 60 * 60 * 24 * 365;
 
 /** Langue de l'interface (cookie « lang ») : la page se recharge avec <html lang dir> */
 export async function setLang(lang: Lang) {
-  (await cookies()).set("lang", lang === "ar" ? "ar" : "fr", { path: "/", maxAge: YEAR, sameSite: "lax" });
+  (await cookies()).set("lang", parseLang(lang), { path: "/", maxAge: YEAR, sameSite: "lax" });
   revalidatePath("/", "layout");
 }
 

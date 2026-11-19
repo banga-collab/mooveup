@@ -7,12 +7,12 @@ import { ChevronsUpDown, CircleHelp, Keyboard, Loader2, LogOut, Monitor, Moon, R
 import { signOut } from "@/app/(auth)/actions";
 import { setLang } from "@/actions/preferences";
 import { useLang, useT } from "@/lib/i18n/client";
-import type { Lang } from "@/lib/i18n/core";
+import { LANGS, type Lang } from "@/lib/i18n/core";
 import type { Role } from "@/lib/types";
 import type { Theme } from "@/lib/types-shell";
 import { cn } from "@/lib/utils";
 import { Avatar } from "@/components/ui";
-import { applyTheme, currentTheme } from "./prefs";
+import { applyTheme, currentTheme, THEME_EVENT } from "./prefs";
 
 /** Menu utilisateur : thème, langue, aide, déconnexion */
 export function UserMenu({ name, role, job, compact }: { name: string; role: Role; job?: string | null; compact?: boolean }) {
@@ -24,7 +24,12 @@ export function UserMenu({ name, role, job, compact }: { name: string; role: Rol
   const [pending, start] = useTransition();
   const ref = useRef<HTMLDivElement>(null);
 
-  useEffect(() => setThemeState(currentTheme()), []);
+  useEffect(() => {
+    const sync = () => setThemeState(currentTheme());
+    sync();
+    window.addEventListener(THEME_EVENT, sync);
+    return () => window.removeEventListener(THEME_EVENT, sync);
+  }, []);
   useEffect(() => setOpen(false), [path]);
   useEffect(() => {
     if (!open) return;
@@ -110,13 +115,8 @@ export function UserMenu({ name, role, job, compact }: { name: string; role: Rol
           </div>
 
           <p className="px-2.5 pb-1 pt-3 text-[11px] font-medium text-slate-400">{t("user.lang")}</p>
-          <div className="mx-1 grid grid-cols-2 gap-0.5 rounded-lg bg-slate-100 p-0.5" role="radiogroup" aria-label={t("user.lang")}>
-            {(
-              [
-                ["fr", "Français"],
-                ["ar", "العربية"],
-              ] as [Lang, string][]
-            ).map(([v, label]) => (
+          <div className="mx-1 grid grid-cols-3 gap-0.5 rounded-lg bg-slate-100 p-0.5" role="radiogroup" aria-label={t("user.lang")}>
+            {LANGS.map(({ id: v, label }) => (
               <button
                 key={v}
                 type="button"

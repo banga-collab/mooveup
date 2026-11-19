@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { AlarmClock, Bell, BellOff, Boxes, CalendarClock, CheckCheck, CreditCard, Globe, ListChecks, Loader2, Receipt, Star, Wallet, type LucideIcon } from "lucide-react";
+import { AlarmClock, Bell, BellOff, Boxes, CalendarClock, CheckCheck, CreditCard, Globe, ListChecks, Loader2, MessageSquareWarning, Receipt, Star, Wallet, type LucideIcon } from "lucide-react";
 import { getNotifications, markNotificationsRead } from "@/actions/notifications";
 import { useT } from "@/lib/i18n/client";
 import type { AppNotification, NotificationKind } from "@/lib/types-shell";
@@ -30,9 +30,13 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     });
   }, []);
 
-  // Au chargement, à chaque changement de page (au plus une fois par minute), toutes les 3 min et au retour sur l'onglet
+  // Au chargement, à chaque changement de page (au plus une fois par minute), toutes les 3 min et au retour sur l'onglet.
+  // Léger différé : la page affichée passe d'abord, et un clic de menu n'interrompt pas une requête en cours
+  // (une action serveur interrompue par une navigation force un rechargement complet de la page).
   useEffect(() => {
-    if (Date.now() - last.current > 60_000) refresh();
+    if (Date.now() - last.current <= 60_000) return;
+    const id = window.setTimeout(refresh, last.current ? 2500 : 1200);
+    return () => window.clearTimeout(id);
   }, [path, refresh]);
   useEffect(() => {
     const id = setInterval(refresh, 180_000);
@@ -63,6 +67,7 @@ const ICONS: Record<NotificationKind, LucideIcon> = {
   tache: ListChecks,
   reservation: Globe,
   prospect: AlarmClock,
+  reclamation: MessageSquareWarning,
 };
 
 /** Cloche de notifications intelligentes (badge = non lues) */

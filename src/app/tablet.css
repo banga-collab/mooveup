@@ -1,0 +1,139 @@
+/*
+ * Mode tablette (classe « tablet » sur <html>, cookie « ui=tablet ») : grandes cibles tactiles, accès rapide.
+ * Règles hors couche (@layer) : elles priment sur les utilitaires Tailwind sans !important.
+ * Seules les règles préfixées par html.tablet s'appliquent ; [data-tablet-only] est masqué ailleurs par sa classe « hidden ».
+ */
+
+/* ---------- Général ---------- */
+html.tablet {
+  -webkit-tap-highlight-color: transparent;
+}
+html.tablet :is(a, button, summary, label, select, [role="button"]) {
+  touch-action: manipulation;
+}
+html.tablet main {
+  /* place pour la barre d'accès rapide */
+  padding-bottom: calc(120px + env(safe-area-inset-bottom));
+}
+/* La barre d'accès rapide remplace la barre du bas mobile */
+html.tablet nav.fixed.inset-x-0.bottom-0 {
+  display: none;
+}
+
+/* ---------- Textes un peu plus grands ---------- */
+html.tablet .text-\[10\.5px\] { font-size: 12px; }
+html.tablet :is(.text-\[11px\], .text-\[11\.5px\]) { font-size: 12.5px; }
+html.tablet :is(.text-\[12px\], .text-\[12\.5px\]) { font-size: 13.5px; }
+html.tablet .text-xs { font-size: 13px; }
+html.tablet .text-\[13px\] { font-size: 14.5px; }
+html.tablet .text-sm { font-size: 15px; }
+
+/* ---------- Cibles tactiles ---------- */
+html.tablet :is(button, a, select, summary, [role="button"], input:not([type="checkbox"]):not([type="radio"]):not([type="range"])):is(.h-8, .h-9):not(.absolute) {
+  height: 44px;
+}
+html.tablet :is(button, a, select, input, summary):is(.h-10) {
+  height: 48px;
+}
+html.tablet :is(button, a, [role="button"]):is(.size-6, .size-7, .size-8, .size-9):not(.absolute) {
+  width: 44px;
+  height: 44px;
+}
+html.tablet :is(button, a).w-9.px-0 {
+  width: 44px;
+}
+html.tablet :is(button, a).min-w-9 {
+  min-width: 44px;
+}
+/* Champs : 16 px évite le zoom automatique des navigateurs mobiles */
+html.tablet :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea) {
+  font-size: 16px;
+}
+html.tablet textarea {
+  min-height: 104px;
+}
+html.tablet input:is([type="checkbox"], [type="radio"]) {
+  width: 22px;
+  height: 22px;
+}
+
+/* ---------- Tableaux et listes ---------- */
+html.tablet table td {
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+html.tablet table th {
+  height: 48px;
+}
+html.tablet main :is(li, [data-row]):is(.py-2, .py-2\.5, .py-3) {
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+
+/* ---------- Menu latéral ---------- */
+html.tablet aside nav a {
+  padding-top: 11px;
+  padding-bottom: 11px;
+  font-size: 15px;
+}
+html.tablet aside nav a svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* ---------- Éléments propres au mode tablette ---------- */
+html.tablet [data-tablet-only="grid"] { display: grid; }
+html.tablet [data-tablet-only="flex"] { display: flex; }
+html.tablet [data-tablet-hide] { display: none; }
+
+/* ---------- Tableau de bord ---------- */
+html.tablet [data-kpi-strip="open"] > button {
+  width: 32px;
+  height: 32px;
+}
+
+/* ---------- Agenda ---------- */
+html.tablet [data-agenda-scroller] {
+  max-height: max(440px, calc(100dvh - 290px));
+}
+html.tablet [data-resize-handle] {
+  /* poignée de durée toujours visible et plus haute au doigt */
+  opacity: 1;
+  height: 16px;
+}
+html.tablet [data-grid-help] {
+  display: none;
+}
+html.tablet [data-agenda-bar] {
+  gap: 8px;
+  padding: 8px;
+}
+
+@media (min-width: 640px) {
+  html.tablet [data-month-day] {
+    min-height: 128px;
+  }
+}
+
+/* ---------- Kids : appel du jour ---------- */
+html.tablet [data-kids-roll] > li {
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+html.tablet [data-kids-roll] > li .text-sm {
+  font-size: 16px;
+}
+html.tablet [data-kids-roll] button[aria-pressed] {
+  height: 52px;
+  min-width: 88px;
+  font-size: 15px;
+  border-radius: 10px;
+}
+/* « P / A / E » : on affiche le mot entier en mode tablette */
+html.tablet [data-kids-roll] button[aria-pressed] > span:first-child { display: none; }
+html.tablet [data-kids-roll] button[aria-pressed] > span:last-child { display: inline; }
+
+/* ---------- Filtres (ListToolbar) ---------- */
+html.tablet [data-list-toolbar] [role="dialog"] {
+  padding: 16px;
+}

@@ -1,0 +1,91 @@
+=====================================================================
+  MOOV'UP — IDENTIFIANTS DE DÉMONSTRATION (données fictives)
+=====================================================================
+
+Ces comptes fonctionnent uniquement en MODE DÉMO
+(variable NEXT_PUBLIC_DEMO=1). Ce ne sont pas de vrais comptes.
+Sur chaque page de connexion, ils apparaissent aussi en boutons :
+un clic suffit pour entrer.
+
+
+---------------------------------------------------------------------
+  1. CRM GÉNÉRAL (Moov'Up CRM — groupe, 7 établissements)
+---------------------------------------------------------------------
+
+En ligne : https://mooveup-p7vw.vercel.app
+En local : http://localhost:3200   (dossier Documents\MoovUp-CRM)
+
+ÉQUIPE  (page /login)
+
+  Direction — tous les établissements
+    E-mail       : direction@moovup.ma
+    Mot de passe : direction2026
+
+  Manager — Lady Moov'Up et Moov'Up Kids
+    E-mail       : lady@moovup.ma
+    Mot de passe : manager2026
+
+  Réception — Anais Clinic et Anais Institut
+    E-mail       : accueil.anais@moovup.ma
+    Mot de passe : accueil2026
+
+ESPACE ADHÉRENT  (page /espace/connexion)
+
+  Yasmine Alaoui — Lady Moov'Up + Anais Institut
+    E-mail       : yasmine.alaoui@gmail.com
+    Mot de passe : adherent2026
+
+  Nabil Tazi — Moov'Up Sports + Evolve Hommes
+    Téléphone    : 06 36 11 23 27
+    Mot de passe : adherent2026
+    (ou bouton « Entrer » sur la page de connexion de l'espace)
+
+PAGES PUBLIQUES (sans connexion)
+  Réservation en ligne : /reserver   (ex. /reserver?e=institut)
+
+
+---------------------------------------------------------------------
+  2. CRM COACHING (Moov'Up Coach)
+---------------------------------------------------------------------
+
+En ligne : https://coaching-nine-kohl.vercel.app
+En local : http://localhost:3100   (dossier Documents\MoovUp-Coach)
+
+  Administrateur — espace coach complet + Espace admin (/admin)
+    E-mail       : admin@moovup.ma
+    Mot de passe : moovup2026
+
+  Head coach — planning de l'équipe (affecte les séances aux coachs)
+    E-mail       : rachid@moovup.ma
+    Mot de passe : head2026
+
+  Coach
+    E-mail       : sara@moovup.ma
+    Mot de passe : coach2026
+
+  Adhérent — espace adhérent (Karim El Amrani)
+    E-mail       : karim@example.com
+    Mot de passe : adherent2026
+
+PAGES PUBLIQUES (sans connexion)
+  Réservation en ligne : /reserver
+
+
+---------------------------------------------------------------------
+  LANCER LES DÉMOS SUR LE PC
+---------------------------------------------------------------------
+
+  CRM général  : dans Documents\MoovUp-CRM   → npm run dev:demo -- -p 3200
+  CRM coaching : dans Documents\MoovUp-Coach → npm run dev:demo -- -p 3100
+
+
+---------------------------------------------------------------------
+  À SAVOIR
+---------------------------------------------------------------------
+
+- En démo, les données sont en mémoire : elles se réinitialisent à
+  chaque redémarrage du serveur (souvent sur Vercel).
+- En version réelle (Supabase), ces comptes n'existent pas :
+  le premier compte créé sur /signup devient Direction (CRM général)
+  ou Administrateur (CRM coaching).
+=====================================================================

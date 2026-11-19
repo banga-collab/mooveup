@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowDownRight, Banknote, Coins, Lock, LockOpen, ReceiptText, Wallet } from "lucide-react";
+import { ArrowDownRight, Banknote, Coins, Lock, LockOpen, ReceiptText, ShoppingCart, Wallet } from "lucide-react";
 import { getProfile, getScope } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { byId } from "@/lib/data";
@@ -24,7 +24,7 @@ import { SolidTile } from "@/components/stat-tile";
 import { EntityBadge, EntityMark } from "@/components/entity-icon";
 import { CloseForm } from "@/components/finance/close-form";
 import { Diff } from "@/components/finance/diff";
-import { METHODS, computeCashDay, expectedCash } from "@/components/finance/cash-day";
+import { METHODS, computeCashDay, expectedCash, type CashDayTotals } from "@/components/finance/cash-day";
 
 export const metadata = { title: "Clôture de caisse" };
 
@@ -150,8 +150,12 @@ export default async function CloturePage({ searchParams }: { searchParams: Prom
     </section>
   );
 
+  // Depuis la caisse : ?caisse=<établissement> choisit directement la caisse
+  const fromPos = one(sp.caisse);
+  const picked = scope.current ?? scope.allowed.find((e) => e.id === fromPos && scope.ids.includes(e.id)) ?? null;
+
   /* ---------- Plusieurs établissements : choisir ---------- */
-  if (!scope.current) {
+  if (!picked) {
     return (
       <div className="space-y-5">
         <PageHeader title="Clôture de caisse" subtitle={`${dateLabel} · choisissez l'établissement`} />
@@ -186,7 +190,7 @@ export default async function CloturePage({ searchParams }: { searchParams: Prom
   }
 
   /* ---------- Un établissement ---------- */
-  const e = scope.current;
+  const e = picked;
   const session = todaySessions.find((s) => s.entity_id === e.id) ?? null;
   const lastFloat = history.find((s) => s.entity_id === e.id)?.opening_float_mad;
   const live = await computeCashDay(supabase, e.id, today);
@@ -194,7 +198,9 @@ export default async function CloturePage({ searchParams }: { searchParams: Prom
   const float = Number(session?.opening_float_mad ?? lastFloat ?? 500);
   const expected = session?.status === "cloturee" ? Number(session.expected_cash_mad) : expectedCash(float, totals);
   const totalIn = METHODS.reduce((a, m) => a + totals.sales[m] + totals.balances[m], 0);
-  const outCash = totals.refunds_cash + totals.expenses_cash;
+  const movesIn = Number((totals as CashDayTotals).moves_in ?? 0);
+  const movesOut = Number((totals as CashDayTotals).moves_out ?? 0);
+  const outCash = totals.refunds_cash + totals.expenses_cash + movesOut;
   const canExpenses = me.role === "direction" || me.role === "manager";
 
   return (
@@ -208,9 +214,14 @@ export default async function CloturePage({ searchParams }: { searchParams: Prom
               Caisse non ouverte
             </Badge>
           ) : session.status === "ouverte" ? (
-            <Badge tone="green" dot>
-              Ouverte depuis {fmtTime(session.opened_at)}
-            </Badge>
+            <>
+              <Badge tone="green" dot>
+                Ouverte depuis {fmtTime(session.opened_at)}
+              </Badge>
+              <LinkButton href={`/caisse?etab=${e.id}`} variant="secondary">
+                <ShoppingCart /> Caisse
+              </LinkButton>
+            </>
           ) : (
             <LinkButton href={`/cloture/${session.id}`} variant="secondary">
               <ReceiptText /> Z de caisse
@@ -222,8 +233,8 @@ export default async function CloturePage({ searchParams }: { searchParams: Prom
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 [&>*]:min-w-0">
         <SolidTile label="Fond de caisse" value={mad(float)} sub={session ? `par ${who(session.opened_by)}` : "à l'ouverture"} icon={<Coins />} />
         <SolidTile label="Espèces encaissées" value={mad(totals.cash_in)} sub="ventes + soldes" icon={<Banknote />} />
-        <SolidTile label="Sorties d'espèces" value={mad(outCash)} sub="dépenses + remboursements" icon={<ArrowDownRight />} />
-        <SolidTile label="Espèces attendues" value={mad(expected)} sub="fond + entrées − sorties" icon={<Wallet />} />
+        <SolidTile label="Sorties d'espèces" value={mad(outCash)} sub={movesOut ? "dépenses, remboursements, retraits" : "dépenses + remboursements"} icon={<ArrowDownRight />} />
+        <SolidTile label="Espèces attendues" value={mad(expected)} sub={movesIn ? "fond + entrées + dépôts − sorties" : "fond + entrées − sorties"} icon={<Wallet />} />
       </div>
 
       <div className="grid gap-5 lg:grid-cols-[1fr_360px] [&>*]:min-w-0">
@@ -279,6 +290,9 @@ export default async function CloturePage({ searchParams }: { searchParams: Prom
                   ),
                   totals.expenses_total ? `${mad(totals.expenses_total)} · dont ${mad(totals.expenses_cash)} en espèces` : mad(0),
                 ],
+                ...(movesIn || movesOut
+                  ? ([["Dépôts / retraits d'espèces", `+ ${mad(movesIn)} · − ${mad(movesOut)}`]] as [ReactNode, ReactNode][])
+                  : []),
                 [<span key="c" className="font-medium text-ink">Espèces attendues en caisse</span>, <span key="v" className="tabular-nums">{mad(expected)}</span>],
               ]}
             />

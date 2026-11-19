@@ -13,6 +13,7 @@ import { ContactLink } from "@/components/quick-view/contact-link";
 import { ForecastChart } from "@/components/exec/forecast-chart";
 import { RelanceButton } from "@/components/exec/relance-button";
 import { TargetForm } from "@/components/exec/target-form";
+import { ExportMenu } from "@/components/data-table/export-menu";
 import { loadExec, type Alert } from "./load";
 
 export const metadata = { title: "Pilotage" };
@@ -130,6 +131,11 @@ export default async function PilotagePage({ searchParams }: { searchParams: Pro
         subtitle={`${scope.current?.short ?? (multi ? "Tous les établissements" : (d.ents[0]?.short ?? ""))} · ${fmtDate(d.today, { weekday: "long", day: "numeric", month: "long" })} · jour ${d.dom} sur ${d.dim}`}
         actions={
           <>
+            <ExportMenu
+              href={`/pilotage/export?${new URLSearchParams([...(q ? [["q", q]] : []), ...(etab ? [["etab", etab]] : []), ...(level ? [["risque", level]] : [])]).toString()}`}
+              formats={["pdf", "xlsx", "csv"]}
+              title="Exporter le pilotage : PDF mis en page (graphiques et tableaux) ou chiffres en Excel"
+            />
             <LinkButton href="/rapports" variant="secondary">
               <BarChart3 /> Rapports détaillés
             </LinkButton>

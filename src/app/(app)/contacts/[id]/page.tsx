@@ -12,6 +12,7 @@ import {
   History,
   Mail,
   MapPin,
+  FileBarChart,
   Pencil,
   Phone,
   Plus,
@@ -181,6 +182,9 @@ export default async function ContactPage({ params, searchParams }: { params: Pr
             </Link>
             <Link href={`/abonnements/nouveau?contact=${id}`} className={buttonClass("secondary")}>
               <CreditCard /> Abonnement
+            </Link>
+            <Link href={`/rapports-clients?client=${id}`} className={buttonClass("ghost")}>
+              <FileBarChart /> Rapport
             </Link>
             <Link href={`/contacts/${id}/modifier`} className={buttonClass("ghost")}>
               <Pencil /> Modifier

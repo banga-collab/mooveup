@@ -7,7 +7,9 @@ import { createClient } from "@/lib/supabase/server";
 import { flash } from "@/lib/flash";
 import { dayKey, fmtDate, parseNum, str } from "@/lib/utils";
 import type { CatalogItem } from "@/lib/types";
-import type { MovementKind, MovementReason, OrderLine, PurchaseOrder, StockSetting, Supplier } from "@/lib/types-ops";
+import { DEFAULT_ALERT_QTY, type MovementKind, type MovementReason, type OrderLine, type PurchaseOrder, type StockSetting, type Supplier } from "@/lib/types-ops";
+import { entity } from "@/lib/entities";
+import { barcodeOf, productKey, type TransferLine } from "@/components/stock/lib";
 import type { FormState } from "@/components/action-form";
 
 type DB = Awaited<ReturnType<typeof createClient>>;
@@ -98,6 +100,22 @@ export async function saveStockSettings(itemId: string, _state: FormState, formD
   const cost = parseNum(formData.get("unit_cost_mad"));
   if (cost !== null && cost < 0) return { error: "Prix d'achat invalide." };
   const supplierId = str(formData.get("supplier_id"));
+
+  // Code-barres (scan en caisse) : unique dans l'établissement, partagé entre établissements pour un même produit
+  if (formData.has("barcode")) {
+    const barcode = (str(formData.get("barcode")) ?? "").replace(/\s/g, "").slice(0, 32) || null;
+    if (barcode && !/^[0-9A-Za-z-]{4,32}$/.test(barcode)) return { error: "Code-barres invalide (chiffres et lettres, 4 caractères minimum)." };
+    if (barcode) {
+      const { data: same } = await supabase.from("catalog_items").select("*").eq("entity_id", item.entity_id).eq("barcode", barcode);
+      const other = ((same ?? []) as CatalogItem[]).find((x) => x.id !== item.id);
+      if (other) return { error: `Ce code-barres est déjà utilisé par « ${other.name} ».` };
+    }
+    const current = (item as CatalogItem & { barcode?: string | null }).barcode ?? null;
+    if (barcode !== current) {
+      const { error } = await supabase.from("catalog_items").update({ barcode }).eq("id", item.id);
+      if (error) return { error: "Code-barres non enregistré : exécutez supabase/establishments.sql (colonne barcode)." };
+    }
+  }
 
   const row = { item_id: item.id, entity_id: item.entity_id, alert_qty: alert, unit_cost_mad: cost === null ? null : Math.round(cost * 100) / 100, supplier_id: supplierId };
   const { data } = await supabase.from("stock_settings").select("*").eq("item_id", item.id).maybeSingle();
@@ -284,4 +302,101 @@ export async function deleteOrder(id: string) {
   await supabase.from("purchase_orders").delete().eq("id", id);
   await flash("Bon de commande supprimé");
   refresh();
+}
+
+/* ---------- Transferts entre établissements ---------- */
+const normName = (s: string) =>
+  s
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+/**
+ * Transfère des produits d'un établissement à un autre : sortie d'un côté, entrée de l'autre.
+ * Si le produit n'existe pas encore dans l'établissement d'arrivée, il y est créé (stock 0, mêmes réglages).
+ */
+export async function createTransfer(_state: FormState, formData: FormData): Promise<FormState> {
+  const { me, allowed, canWrite, supabase } = await ctx();
+  if (!canWrite) return { error: "Votre rôle ne permet pas de transférer du stock." };
+  const from = str(formData.get("from"));
+  const to = str(formData.get("to"));
+  if (!from || !to || !allowed.includes(from) || !allowed.includes(to)) return { error: "Choisissez deux établissements autorisés." };
+  if (from === to) return { error: "Choisissez deux établissements différents." };
+
+  let raw: { item_id?: string; qty?: number | string }[] = [];
+  try {
+    raw = JSON.parse(String(formData.get("lines") ?? "[]"));
+  } catch {
+    return { error: "Lignes du transfert illisibles. Réessayez." };
+  }
+  const qtyBy = new Map<string, number>();
+  for (const l of Array.isArray(raw) ? raw : []) {
+    const q = Math.round(Number(l.qty));
+    if (l.item_id && Number.isFinite(q) && q > 0) qtyBy.set(l.item_id, (qtyBy.get(l.item_id) ?? 0) + q);
+  }
+  if (!qtyBy.size) return { error: "Ajoutez au moins un produit avec une quantité." };
+  const note = str(formData.get("note"))?.slice(0, 200) ?? null;
+  const shortOf = (id: string) => entity(id)?.short ?? id;
+
+  const [{ data: srcRows }, { data: dstRows }, { data: setRows }] = await Promise.all([
+    supabase.from("catalog_items").select("*").eq("entity_id", from).eq("kind", "produit"),
+    supabase.from("catalog_items").select("*").eq("entity_id", to).eq("kind", "produit"),
+    supabase.from("stock_settings").select("*").in("entity_id", [from, to]),
+  ]);
+  const src = new Map(((srcRows ?? []) as CatalogItem[]).map((i) => [i.id, i]));
+  const dst = [...((dstRows ?? []) as CatalogItem[])];
+  const settings = (setRows ?? []) as StockSetting[];
+
+  for (const [id, qty] of qtyBy) {
+    const it = src.get(id);
+    if (!it) return { error: `Un produit n'appartient pas à ${shortOf(from)}.` };
+    const have = Math.max(0, Number(it.stock ?? 0));
+    if (qty > have) return { error: `Stock insuffisant pour « ${it.name} » chez ${shortOf(from)} : ${have} disponible${have > 1 ? "s" : ""}.` };
+  }
+
+  // Numéro TR-AAAA-0001
+  const year = dayKey().slice(0, 4);
+  const { data: nums } = await supabase.from("stock_transfers").select("number").ilike("number", `TR-${year}-%`);
+  const max = ((nums ?? []) as { number: string }[]).reduce((m, r) => Math.max(m, Number(r.number.slice(8)) || 0), 0);
+  const number = `TR-${year}-${String(max + 1).padStart(4, "0")}`;
+  const id = crypto.randomUUID();
+
+  // Produit correspondant à l'arrivée (même code-barres ou même nom), créé si besoin
+  const lines: TransferLine[] = [];
+  for (const [itemId, qty] of qtyBy) {
+    const s = src.get(itemId)!;
+    const key = productKey(s);
+    let d = dst.find((x) => productKey(x) === key) ?? dst.find((x) => normName(x.name) === normName(s.name));
+    if (!d) {
+      const barcode = barcodeOf(s);
+      const { data: created } = await supabase
+        .from("catalog_items")
+        .insert({ entity_id: to, kind: "produit", name: s.name, category: s.category, price_mad: s.price_mad, duration_min: null, duration_days: null, sessions_count: null, stock: 0, active: true, ...(barcode ? { barcode } : {}) })
+        .select()
+        .single();
+      if (!created) return { error: `Impossible de créer « ${s.name} » chez ${shortOf(to)}.` };
+      d = created as CatalogItem;
+      dst.push(d);
+      const st = settings.find((x) => x.item_id === s.id);
+      await supabase.from("stock_settings").insert({ item_id: d.id, entity_id: to, alert_qty: st?.alert_qty ?? DEFAULT_ALERT_QTY, unit_cost_mad: st?.unit_cost_mad ?? null, supplier_id: st?.supplier_id ?? null });
+    }
+    const cost = Number(settings.find((x) => x.item_id === s.id)?.unit_cost_mad ?? s.price_mad);
+    lines.push({ label: s.name, qty, from_item_id: s.id, to_item_id: d.id, unit_cost_mad: cost });
+  }
+
+  const { error } = await supabase.from("stock_transfers").insert({ id, number, from_entity_id: from, to_entity_id: to, lines, note, created_by: me.id, created_at: new Date().toISOString() });
+  if (error) return { error: "Impossible d'enregistrer le transfert (table stock_transfers manquante ?)." };
+
+  for (const l of lines) {
+    const s = src.get(l.from_item_id)!;
+    const d = dst.find((x) => x.id === l.to_item_id)!;
+    await applyMove(supabase, s, -l.qty, "sortie", "transfert" as MovementReason, { note: `Transfert ${number} vers ${shortOf(to)}${note ? ` · ${note}` : ""}`, ref: id, author: me.id });
+    await applyMove(supabase, d, l.qty, "entree", "transfert" as MovementReason, { note: `Transfert ${number} depuis ${shortOf(from)}${note ? ` · ${note}` : ""}`, ref: id, author: me.id });
+  }
+  const units = lines.reduce((a, l) => a + l.qty, 0);
+  await flash(`Transfert ${number} : ${units} article${units > 1 ? "s" : ""} vers ${shortOf(to)}`);
+  refresh();
+  redirect(`/stock?onglet=transferts`);
 }

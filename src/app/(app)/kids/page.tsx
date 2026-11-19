@@ -10,7 +10,7 @@ import { markAllPresent, markAttendance } from "@/actions/kids";
 import { absenceMessage, loadKids, mainParent, phoneKey } from "@/components/kids/kids-data";
 import { AttendanceButton } from "@/components/kids/attendance-button";
 import { WhatsAppIcon } from "@/components/contacts/bits";
-import { SolidTile } from "@/components/stat-tile";
+import { KpiStrip } from "@/components/kpi-strip";
 import { SubmitButton } from "@/components/submit-button";
 import { Badge, buttonClass, Card, CardHeader, Empty, LinkButton, PageHeader, Segmented } from "@/components/ui";
 import { ListToolbar, type FilterGroup } from "@/components/list-toolbar";
@@ -167,7 +167,7 @@ export default async function KidsPage({ searchParams }: { searchParams: Promise
                 </div>
               </div>
               {list.length ? (
-                <ul className="divide-y divide-line border-t border-line">
+                <ul className="divide-y divide-line border-t border-line" data-kids-roll>
                   {list.map((c) => {
                     const st = marks.get(c.id);
                     const rate = rateByKid.get(c.id) ?? null;
@@ -420,12 +420,22 @@ export default async function KidsPage({ searchParams }: { searchParams: Promise
         }
       />
 
-      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4 [&>*]:min-w-0">
-        <SolidTile label="Enfants inscrits" value={kidIds.size} sub={`${groups.length} groupe${groups.length > 1 ? "s" : ""}`} icon={<Baby />} href="/kids?v=familles" />
-        <SolidTile label="Présence (4 semaines)" value={globalRate === null ? "–" : `${globalRate} %`} sub={`${attendance.filter((a) => a.status === "absent").length} absences`} icon={<ListChecks />} />
-        <SolidTile label="Cours aujourd'hui" value={todayGroups.length} sub={`${expectedToday} enfant${expectedToday > 1 ? "s" : ""} attendu${expectedToday > 1 ? "s" : ""}`} icon={<CalendarCheck />} href="/kids" />
-        <SolidTile label="Liste d'attente" value={waiting.length} sub={birthdays.length ? `${birthdays.length} anniversaire${birthdays.length > 1 ? "s" : ""} ce mois` : "Aucun anniversaire ce mois"} icon={<Users />} href="/kids?v=groupes" />
-      </div>
+      <KpiStrip
+        id="kids"
+        className="mb-6"
+        items={[
+          { label: "Enfants inscrits", value: kidIds.size, sub: `${groups.length} groupe${groups.length > 1 ? "s" : ""}`, icon: <Baby />, href: "/kids?v=familles" },
+          { label: "Présence (4 semaines)", value: globalRate === null ? "–" : `${globalRate} %`, sub: `${attendance.filter((a) => a.status === "absent").length} absences`, icon: <ListChecks /> },
+          { label: "Cours aujourd'hui", value: todayGroups.length, sub: `${expectedToday} enfant${expectedToday > 1 ? "s" : ""} attendu${expectedToday > 1 ? "s" : ""}`, icon: <CalendarCheck />, href: "/kids" },
+          {
+            label: "Liste d'attente",
+            value: waiting.length,
+            sub: birthdays.length ? `${birthdays.length} anniversaire${birthdays.length > 1 ? "s" : ""} ce mois` : "Aucun anniversaire ce mois",
+            icon: <Users />,
+            href: "/kids?v=groupes",
+          },
+        ]}
+      />
 
       <div className="mb-4">
         <Segmented

@@ -13,7 +13,7 @@ import { Card, tableClass } from "@/components/ui";
 import { EntityMark } from "@/components/entity-icon";
 import { PrintButton } from "@/components/finance/controls";
 import { Diff } from "@/components/finance/diff";
-import { METHODS } from "@/components/finance/cash-day";
+import { METHODS, type CashDayTotals } from "@/components/finance/cash-day";
 
 export const metadata = { title: "Z de caisse" };
 
@@ -41,7 +41,7 @@ export default async function ZPage({ params }: { params: Promise<{ id: string }
   const people = byId((profileRows ?? []) as Profile[]);
   const who = (pid: string | null) => (pid ? (people.get(pid)?.full_name ?? "–") : "–");
   const e = entity(s.entity_id)!;
-  const t = s.totals;
+  const t = s.totals as CashDayTotals;
   const totalIn = METHODS.reduce((a, m) => a + t.sales[m] + t.balances[m], 0);
   const coins = s.breakdown ? DENOMINATIONS.filter((d) => s.breakdown![String(d)]) : [];
 
@@ -106,6 +106,8 @@ export default async function ZPage({ params }: { params: Promise<{ id: string }
         <div className="mt-1 divide-y divide-line">
           <Row label="Fond de caisse" value={mad(s.opening_float_mad)} />
           <Row label="+ Espèces encaissées" value={mad(t.cash_in)} />
+          {!!t.moves_in && <Row label="+ Dépôts d'espèces" value={mad(t.moves_in)} />}
+          {!!t.moves_out && <Row label="− Retraits d'espèces" value={mad(t.moves_out)} />}
           <Row label="− Remboursements en espèces" value={mad(t.refunds_cash)} />
           <Row label="− Dépenses payées en espèces" value={mad(t.expenses_cash)} />
           <Row label="Espèces attendues" value={mad(s.expected_cash_mad)} strong />

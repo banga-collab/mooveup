@@ -19,7 +19,14 @@ export function seedMember(db: SeedDB, h: SeedHelpers): SeedDB {
 
   const points = new Map<string, number>();
   for (const r of ledger) points.set(r.contact_id, (points.get(r.contact_id) ?? 0) + Number(r.points));
-  const count = (rows: SeedDB[string], id: string) => rows.filter((r) => r.contact_id === id).length;
+  // Nombre de lignes par client, calculé une fois (le tri ci-dessous l'appelle à chaque comparaison)
+  const tally = (rows: SeedDB[string]) => {
+    const m = new Map<string, number>();
+    for (const r of rows) m.set(r.contact_id, (m.get(r.contact_id) ?? 0) + 1);
+    return m;
+  };
+  const counts = new Map([[sales, tally(sales)], [appts, tally(appts)]]);
+  const count = (rows: SeedDB[string], id: string) => counts.get(rows)?.get(id) ?? 0;
 
   const ladyActive = new Set(subs.filter((s) => s.entity_id === "lady" && s.status === "actif" && s.start_date <= today && s.end_date >= today).map((s) => s.contact_id));
   const lady = contacts

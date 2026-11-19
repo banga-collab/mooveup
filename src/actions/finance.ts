@@ -22,6 +22,7 @@ import {
   type ExpenseCategory,
   type ExpenseMethod,
 } from "@/lib/types-finance";
+import type { SupplierFull } from "@/lib/types-business";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const stamp = () => Date.now().toString(36);
@@ -180,6 +181,8 @@ export async function createExpense(_state: FormState, fd: FormData): Promise<Fo
   const receipt_url = file instanceof File ? await storeReceipt(file, entityId, date) : null;
 
   const supabase = await createClient();
+  const supplier = await resolveSupplier(supabase, fd, entityId, category);
+  if ("error" in supplier) return { error: supplier.error };
   const { data, error } = await supabase
     .from("expenses")
     .insert({
@@ -188,7 +191,8 @@ export async function createExpense(_state: FormState, fd: FormData): Promise<Fo
       category,
       amount_mad: r2(amount),
       method,
-      supplier: str(fd.get("supplier"))?.slice(0, 120) ?? null,
+      supplier: supplier.name,
+      supplier_id: supplier.id,
       note: str(fd.get("note"))?.slice(0, 500) ?? null,
       receipt_url,
       created_by: me.id,
@@ -210,7 +214,45 @@ export async function createExpense(_state: FormState, fd: FormData): Promise<Fo
   await flash(`Dépense de ${mad(amount)} enregistrée`);
   revalidatePath("/depenses");
   revalidatePath("/cloture");
+  if (supplier.id) revalidatePath(`/fournisseurs/${supplier.id}`);
   redirect(`/depenses?month=${date.slice(0, 7)}&ok=${stamp()}`);
+}
+
+/**
+ * Fournisseur d'une dépense : fiche choisie dans le répertoire (`supplier_id`),
+ * création rapide (`supplier_new`) ou texte libre historique (`supplier`).
+ */
+async function resolveSupplier(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  fd: FormData,
+  entityId: EntityId,
+  category: ExpenseCategory,
+): Promise<{ id: string | null; name: string | null } | { error: string }> {
+  const id = str(fd.get("supplier_id"));
+  if (id) {
+    const { data } = await supabase.from("suppliers").select("*").eq("id", id).maybeSingle();
+    const sup = data as SupplierFull | null;
+    if (!sup) return { error: "Fournisseur introuvable : choisissez-le à nouveau dans la liste." };
+    const patch: Partial<SupplierFull> = {};
+    if ((sup.entity_ids ?? []).length && !sup.entity_ids.includes(entityId)) patch.entity_ids = [...sup.entity_ids, entityId];
+    if (!(sup.categories ?? []).includes(category)) patch.categories = [...(sup.categories ?? []), category];
+    if (Object.keys(patch).length) await supabase.from("suppliers").update(patch).eq("id", sup.id);
+    return { id: sup.id, name: sup.name };
+  }
+  const fresh = str(fd.get("supplier_new"))?.slice(0, 120) ?? null;
+  if (fresh) {
+    const { data: same } = await supabase.from("suppliers").select("*").ilike("name", fresh);
+    const found = ((same ?? []) as SupplierFull[]).find((s) => s.name.trim().toLowerCase() === fresh.toLowerCase());
+    if (found) return { id: found.id, name: found.name };
+    const { data } = await supabase
+      .from("suppliers")
+      .insert({ name: fresh, contact_name: null, phone: str(fd.get("supplier_phone"))?.slice(0, 30) ?? null, email: null, city: "Agadir", entity_ids: [entityId], product_ids: [], notes: null, categories: [category], documents: [], active: true })
+      .select()
+      .single();
+    const sup = data as SupplierFull | null;
+    return sup ? { id: sup.id, name: sup.name } : { id: null, name: fresh };
+  }
+  return { id: null, name: str(fd.get("supplier"))?.slice(0, 120) ?? null };
 }
 
 export async function deleteExpense(id: string) {

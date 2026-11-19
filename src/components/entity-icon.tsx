@@ -1,13 +1,54 @@
-import { Dumbbell, Flower2, Scissors, Smile, Sparkles, Stethoscope, Zap, Building2, type LucideProps } from "lucide-react";
-import { entity } from "@/lib/entities";
+import {
+  Activity,
+  Baby,
+  Bike,
+  Building2,
+  Coffee,
+  Dumbbell,
+  Flower2,
+  Gem,
+  HeartPulse,
+  Leaf,
+  Scissors,
+  Smile,
+  Sparkles,
+  Stethoscope,
+  Store,
+  Trophy,
+  Waves,
+  Zap,
+  type LucideIcon,
+  type LucideProps,
+} from "lucide-react";
+import { entity, type EntityIconName } from "@/lib/entities";
 import { cn } from "@/lib/utils";
 
-const ICONS = { Dumbbell, Flower2, Smile, Zap, Stethoscope, Sparkles, Scissors };
+/** Icônes disponibles pour les établissements (voir ENTITY_ICONS) */
+export const ENTITY_ICON_MAP: Record<EntityIconName, LucideIcon> = {
+  Dumbbell,
+  Flower2,
+  Smile,
+  Zap,
+  Stethoscope,
+  Sparkles,
+  Scissors,
+  Building2,
+  Waves,
+  Bike,
+  HeartPulse,
+  Baby,
+  Trophy,
+  Leaf,
+  Gem,
+  Coffee,
+  Store,
+  Activity,
+};
 
-/** Icône vectorielle d'un établissement (ou du groupe si null) */
+/** Icône vectorielle d'un établissement (ou du groupe si null ; icône générique si inconnu) */
 export function EntityIcon({ id, ...props }: { id: string | null | undefined } & Omit<LucideProps, "id">) {
   const e = entity(id);
-  const I = e ? ICONS[e.icon] : Building2;
+  const I = (e && ENTITY_ICON_MAP[e.icon]) || Building2;
   return <I {...props} />;
 }
 

@@ -21,10 +21,10 @@ export const DEMO_ACCOUNTS = [
 type Row = Record<string, any>;
 export type DB = Record<string, Row[]>;
 
-const g = globalThis as unknown as { __moovupCrmV4?: DB };
+const g = globalThis as unknown as { __moovupCrmV6?: DB };
 export function demoDb(): DB {
-  if (!g.__moovupCrmV4) g.__moovupCrmV4 = seed();
-  return g.__moovupCrmV4;
+  if (!g.__moovupCrmV6) g.__moovupCrmV6 = seed();
+  return g.__moovupCrmV6;
 }
 
 /* ---------- Faux constructeur de requêtes ---------- */
@@ -123,14 +123,28 @@ class Query implements PromiseLike<any> {
       if (this.table === "sales") db.sale_items = (db.sale_items ?? []).filter((r) => !removedIds.has(r.sale_id));
       return { data: null, error: null, count: removedIds.size };
     }
-    let rows = tbl.filter(match).map((r) => ({ ...r }));
-    for (const [k, asc] of [...this.sorts].reverse()) {
-      rows.sort((a, b) => (a[k] === b[k] ? 0 : (a[k] ?? "") > (b[k] ?? "") ? (asc ? 1 : -1) : asc ? -1 : 1));
+    // Comptage seul : pas de copie ni de tri
+    if (this.head) {
+      let n = 0;
+      for (const r of tbl) if (match(r)) n++;
+      return { data: null, error: null, count: n };
     }
-    if (this.head) return { data: null, error: null, count: rows.length };
+    let rows = this.filters.length ? tbl.filter(match) : tbl.slice();
+    if (this.sorts.length) {
+      const sorts = this.sorts;
+      rows.sort((a, b) => {
+        for (const [k, asc] of sorts) {
+          if (a[k] === b[k]) continue;
+          return (a[k] ?? "") > (b[k] ?? "") ? (asc ? 1 : -1) : asc ? -1 : 1;
+        }
+        return 0;
+      });
+    }
     const count = rows.length;
     if (this.max !== undefined) rows = rows.slice(0, this.max);
-    return this.shape(rows, count);
+    if (this.one) rows = rows.slice(0, 1);
+    // Copie uniquement des lignes renvoyées (les pages peuvent les modifier sans toucher la base)
+    return this.shape(rows.map((r) => ({ ...r })), count);
   }
 
   private shape(rows: Row[], count = rows.length) {

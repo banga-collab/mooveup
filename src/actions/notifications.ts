@@ -42,7 +42,7 @@ export async function getNotifications(): Promise<AppNotification[]> {
   const none = Promise.resolve({ data: [] as never[] });
   const old = new Date(Date.now() - 30 * 86_400_000).toISOString();
 
-  const [appts, items, settings, cash, subs, unpaid, reviews, tasks, bookings, leads] = await Promise.all([
+  const [appts, items, settings, cash, subs, unpaid, reviews, tasks, bookings, leads, complaints] = await Promise.all([
     supabase.from("appointments").select("*").in("entity_id", ids).eq("status", "prevu").gte("starts_at", agadirToIso(tomorrow, "00:00")).lt("starts_at", agadirToIso(addDaysKey(tomorrow, 1), "00:00")),
     desk ? supabase.from("catalog_items").select("*").in("entity_id", ids).eq("kind", "produit").eq("active", true) : none,
     desk ? supabase.from("stock_settings").select("*").in("entity_id", ids) : none,
@@ -53,6 +53,7 @@ export async function getNotifications(): Promise<AppNotification[]> {
     supabase.from("tasks").select("*").in("entity_id", ids).eq("done", false).lt("due_date", today),
     desk ? supabase.from("online_bookings").select("*").in("entity_id", ids).eq("status", "nouvelle").gte("starts_at", new Date().toISOString()) : none,
     desk ? supabase.from("leads").select("*").in("entity_id", ids).in("stage", ["nouveau", "contacte", "essai", "offre"]).lte("next_action_on", today) : none,
+    desk ? supabase.from("complaints").select("id, entity_id, status, kind").in("entity_id", ids).eq("status", "nouvelle") : none,
   ]);
 
   const A = (appts.data ?? []) as Appointment[];
@@ -78,6 +79,8 @@ export async function getNotifications(): Promise<AppNotification[]> {
   push("caisse", "alert", C, "notif.caisse", C.map((c) => `${mad(Number(c.difference_mad))}`).join(" · "), C.length === 1 ? `/cloture/${C[0]!.id}` : "/cloture");
   push("rdv", "alert", A, "notif.rdv", names(A.map((a) => a.contact_id), contacts), `/agenda?date=${tomorrow}`);
   push("reservation", "alert", B, "notif.reservation", B.slice(0, 2).map((b) => b.full_name).join(", ") + (B.length > 2 ? ` +${B.length - 2}` : ""), "/acces");
+  const Q = (complaints.data ?? []) as { id: string; kind?: string }[];
+  push("reclamation", "alert", Q, "notif.reclamation", `${Q.length} à traiter`, "/reclamations");
   push("avis", "alert", R, "notif.avis", names(R.map((r) => r.contact_id), contacts), "/avis");
   push("stock", "alert", low, "notif.stock", low.slice(0, 2).map((i) => i.name).join(", ") + (low.length > 2 ? ` +${low.length - 2}` : ""), "/stock");
   push("abonnement", "info", S, "notif.abonnement", names(S.map((s) => s.contact_id), contacts), "/abonnements?filtre=expire-bientot");

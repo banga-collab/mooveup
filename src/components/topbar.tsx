@@ -5,8 +5,9 @@ import { CalendarPlus, Search, ShoppingCart, UserPlus } from "lucide-react";
 import { useT } from "@/lib/i18n/client";
 import { buttonClass, Kbd } from "./ui";
 import { NotificationBell } from "./shell/bell";
+import { TabletToggle, ThemeToggle } from "./shell/header-toggles";
 
-/** Barre du haut (bureau) : recherche universelle (Ctrl+K), cloche, 3 actions fréquentes */
+/** Barre du haut (bureau) : recherche universelle (Ctrl+K), 3 actions fréquentes, mode sombre, mode tablette, cloche */
 export function Topbar() {
   const t = useT();
   return (
@@ -29,6 +30,9 @@ export function Topbar() {
         <Link href="/agenda/nouveau" className={buttonClass("ghost")} title={t("top.shortcutHint", { key: "R" })}>
           <CalendarPlus /> {t("top.rdv")}
         </Link>
+        <span className="mx-0.5 h-5 w-px bg-line" aria-hidden />
+        <ThemeToggle />
+        <TabletToggle />
         <NotificationBell />
         <Link href="/caisse" className={buttonClass("primary")} title={t("top.shortcutHint", { key: "V" })}>
           <ShoppingCart /> {t("top.sell")}

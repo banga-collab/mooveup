@@ -1,12 +1,15 @@
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Paperclip, Percent, Plus, TrendingUp, Wallet, Receipt } from "lucide-react";
+import { ChevronLeft, ChevronRight, Paperclip, Percent, Plus, TrendingUp, Truck, Wallet, Receipt, X } from "lucide-react";
 import { requireManager, getScope } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { monthKey } from "@/lib/data";
 import { entity } from "@/lib/entities";
 import { agadirToIso, cn, dayKey, fmtDate, mad, pct } from "@/lib/utils";
 import type { Sale } from "@/lib/types";
-import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABEL, EXPENSE_METHOD_LABEL, type Expense, type ExpenseCategory } from "@/lib/types-finance";
+import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABEL, EXPENSE_METHOD_LABEL, type ExpenseCategory } from "@/lib/types-finance";
+import type { ExpenseRow, SupplierFull } from "@/lib/types-business";
+import { SupplierPicker } from "@/components/finance/supplier-picker";
+import { norm } from "@/lib/search-match";
 import { createExpense, deleteExpense } from "@/actions/finance";
 import { ActionForm } from "@/components/action-form";
 import { SubmitButton } from "@/components/submit-button";
@@ -36,7 +39,7 @@ function trend(cur: number, prev: number) {
   return `${d > 0 ? "+" : ""}${d} %`;
 }
 
-export default async function DepensesPage({ searchParams }: { searchParams: Promise<{ month?: string; cat?: string; q?: string; etab?: string; mode?: string; tri?: string; ordre?: string }> }) {
+export default async function DepensesPage({ searchParams }: { searchParams: Promise<{ month?: string; cat?: string; q?: string; etab?: string; mode?: string; tri?: string; ordre?: string; fournisseur?: string }> }) {
   await requireManager();
   const [sp, scope] = await Promise.all([searchParams, getScope()]);
   const supabase = await createClient();
@@ -49,12 +52,19 @@ export default async function DepensesPage({ searchParams }: { searchParams: Pro
   const from = `${months[0]}-01`;
   const to = `${shiftMonth(month, 1)}-01`;
 
-  const [{ data: saleRows }, { data: expRows }] = await Promise.all([
+  const [{ data: saleRows }, { data: expRows }, { data: supRows }] = await Promise.all([
     supabase.from("sales").select("*").in("entity_id", scope.ids).gte("sold_at", agadirToIso(from, "00:00")).lt("sold_at", agadirToIso(to, "00:00")),
     supabase.from("expenses").select("*").in("entity_id", scope.ids).gte("date", from).lt("date", to).order("date", { ascending: false }),
+    supabase.from("suppliers").select("*").order("name"),
   ]);
   const sales = ((saleRows ?? []) as Sale[]).filter((s) => s.status !== "remboursee");
-  const expenses = (expRows ?? []) as Expense[];
+  const expenses = (expRows ?? []) as ExpenseRow[];
+  // Répertoire fournisseurs (fiches communes au groupe ou servant un établissement du périmètre)
+  const suppliers = ((supRows ?? []) as SupplierFull[]).filter((s) => !(s.entity_ids ?? []).length || s.entity_ids.some((e) => scope.allowed.some((a) => a.id === e)));
+  const supplierById = new Map(suppliers.map((s) => [s.id, s]));
+  const supplierByName = new Map(suppliers.map((s) => [norm(s.name), s]));
+  /** Fiche d'une dépense : lien direct, sinon même nom (anciennes saisies) */
+  const supOf = (x: ExpenseRow) => (x.supplier_id ? supplierById.get(x.supplier_id) : x.supplier ? supplierByName.get(norm(x.supplier)) : undefined);
 
   const caOf = (m: string, e?: string) => sales.filter((s) => monthKey(s.sold_at) === m && (!e || s.entity_id === e)).reduce((a, s) => a + Number(s.total_mad), 0);
   const expOf = (m: string, e?: string) => expenses.filter((x) => x.date.startsWith(m) && (!e || x.entity_id === e)).reduce((a, x) => a + Number(x.amount_mad), 0);
@@ -83,10 +93,12 @@ export default async function DepensesPage({ searchParams }: { searchParams: Pro
   const q = (sp.q ?? "").trim();
   const etab = ents.some((e) => e.id === sp.etab) ? sp.etab! : "";
   const mode = sp.mode && sp.mode in EXPENSE_METHOD_LABEL ? sp.mode : "";
+  const fSup = sp.fournisseur && (sp.fournisseur === "aucun" || supplierById.has(sp.fournisseur)) ? sp.fournisseur : "";
   const searched = monthExpenses.filter(
     (x) =>
       (!etab || x.entity_id === etab) &&
       (!mode || x.method === mode) &&
+      (!fSup || (fSup === "aucun" ? !supOf(x) : supOf(x)?.id === fSup)) &&
       matchesQuery(q, x.supplier, x.note, EXPENSE_CATEGORY_LABEL[x.category], x.category, x.amount_mad, mad(Number(x.amount_mad)), EXPENSE_METHOD_LABEL[x.method], entity(x.entity_id)?.short),
   );
   const sort = readSort(sp, ["date", "categorie", "detail", "montant"] as const, "date", "desc");
@@ -95,9 +107,25 @@ export default async function DepensesPage({ searchParams }: { searchParams: Pro
     (x) => (sort.key === "date" ? x.date : sort.key === "categorie" ? (EXPENSE_CATEGORY_LABEL[x.category] ?? x.category) : sort.key === "detail" ? (x.supplier ?? x.note) : Number(x.amount_mad)),
     sort.dir,
   );
-  const filtering = !!(q || etab || mode || cat);
+  const filtering = !!(q || etab || mode || cat || fSup);
   const catCounts = EXPENSE_CATEGORIES.map((c) => ({ ...c, n: searched.filter((x) => x.category === c.id).length })).filter((c) => c.n > 0 || c.id === cat);
   const listTotal = list.reduce((a, x) => a + Number(x.amount_mad), 0);
+  // Totaux par fournisseur (mois affiché, filtres établissement / paiement / catégorie appliqués)
+  const supTotals = new Map<string, { id: string | null; name: string; total: number; n: number }>();
+  for (const x of monthExpenses) {
+    if ((etab && x.entity_id !== etab) || (mode && x.method !== mode) || (cat && x.category !== cat)) continue;
+    const s = supOf(x);
+    const key = s?.id ?? (x.supplier ? `txt:${norm(x.supplier)}` : "aucun");
+    const cur = supTotals.get(key) ?? { id: s?.id ?? null, name: s?.name ?? x.supplier ?? "Sans fournisseur", total: 0, n: 0 };
+    cur.total += Number(x.amount_mad);
+    cur.n += 1;
+    supTotals.set(key, cur);
+  }
+  const bySupplier = [...supTotals.values()].sort((a, b) => b.total - a.total);
+  const unlinked = monthExpenses.filter((x) => !supOf(x)).length;
+  const supplierOptions = suppliers
+    .filter((s) => s.active !== false)
+    .map((s) => ({ id: s.id, name: s.name, hint: (s.categories ?? []).map((c) => EXPENSE_CATEGORY_LABEL[c as ExpenseCategory] ?? c).slice(0, 2).join(", ") || s.city }));
 
   const href = (p: { month?: string; cat?: string | null }) => {
     const q = new URLSearchParams();
@@ -105,11 +133,18 @@ export default async function DepensesPage({ searchParams }: { searchParams: Pro
     if (m !== current) q.set("month", m);
     const c = p.cat === undefined ? cat : p.cat;
     if (c) q.set("cat", c);
-    for (const k of ["q", "etab", "mode", "tri", "ordre"] as const) if (sp[k]) q.set(k, sp[k]!);
+    for (const k of ["q", "etab", "mode", "tri", "ordre", "fournisseur"] as const) if (sp[k]) q.set(k, sp[k]!);
     const s = q.toString();
     return `/depenses${s ? `?${s}` : ""}`;
   };
   const defaultEntity = scope.current?.id ?? ents[0]?.id ?? scope.allowed[0]?.id;
+  const supHref = (id: string | null) => {
+    const u = new URLSearchParams(href({}).split("?")[1] ?? "");
+    if (id) u.set("fournisseur", id);
+    else u.delete("fournisseur");
+    const qs = u.toString();
+    return `/depenses${qs ? `?${qs}` : ""}`;
+  };
 
   return (
     <div className="space-y-5">
@@ -231,6 +266,43 @@ export default async function DepensesPage({ searchParams }: { searchParams: Pro
             </Card>
           )}
 
+          {bySupplier.length > 0 && (
+            <Card className="p-5">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-ink">Par fournisseur</h3>
+                <Link href="/fournisseurs" className="text-[13px] font-medium text-brand-600 hover:underline">
+                  Répertoire
+                </Link>
+              </div>
+              <ul className="divide-y divide-line text-[13px]">
+                {bySupplier.slice(0, 8).map((r) => {
+                  const active = r.id ? fSup === r.id : false;
+                  return (
+                    <li key={r.id ?? r.name} className="flex items-center gap-3 py-2">
+                      <span className="min-w-0 flex-1 truncate">
+                        {r.id ? (
+                          <Link href={supHref(active ? null : r.id)} className={cn("hover:underline", active ? "font-semibold text-brand-600" : "text-slate-700")}>
+                            {r.name}
+                          </Link>
+                        ) : (
+                          <span className="text-muted">{r.name}</span>
+                        )}
+                        <span className="ml-1.5 text-xs text-muted">· {r.n}</span>
+                      </span>
+                      <span className="shrink-0 font-semibold tabular-nums text-ink">{mad(r.total)}</span>
+                      <span className="w-10 shrink-0 text-right text-xs tabular-nums text-muted">{pct(r.total, dep)} %</span>
+                    </li>
+                  );
+                })}
+              </ul>
+              {unlinked > 0 && (
+                <Link href={supHref("aucun")} className="mt-3 block text-xs text-muted hover:text-ink">
+                  {unlinked} dépense{unlinked > 1 ? "s" : ""} sans fiche fournisseur →
+                </Link>
+              )}
+            </Card>
+          )}
+
           <Card>
             <CardHeader
               title={cat ? `Dépenses · ${EXPENSE_CATEGORY_LABEL[cat]}` : "Dépenses du mois"}
@@ -247,6 +319,11 @@ export default async function DepensesPage({ searchParams }: { searchParams: Pro
                   ]}
                   right={<ResultCount shown={list.length} total={monthExpenses.length} filtered={filtering} unit="dépense" />}
                 />
+                {fSup && (
+                  <Link href={supHref(null)} className="mb-3 inline-flex items-center gap-1.5 rounded-md bg-brand-50 px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100">
+                    <Truck className="size-3.5" /> {fSup === "aucun" ? "Sans fiche fournisseur" : supplierById.get(fSup)?.name} <X className="size-3.5" />
+                  </Link>
+                )}
               </div>
             )}
             {list.length ? (
@@ -270,7 +347,13 @@ export default async function DepensesPage({ searchParams }: { searchParams: Pro
                         </td>
                         <td className="whitespace-nowrap text-slate-700">{EXPENSE_CATEGORY_LABEL[x.category] ?? x.category}</td>
                         <td className="min-w-[180px]">
-                          <span className="block text-ink">{x.supplier ?? x.note ?? "–"}</span>
+                          {supOf(x) ? (
+                            <Link href={`/fournisseurs/${supOf(x)!.id}`} className="block text-ink hover:text-brand-600 hover:underline">
+                              {supOf(x)!.name}
+                            </Link>
+                          ) : (
+                            <span className="block text-ink">{x.supplier ?? x.note ?? "–"}</span>
+                          )}
                           <span className="block text-xs text-muted">
                             {EXPENSE_METHOD_LABEL[x.method] ?? x.method}
                             {x.supplier && x.note ? ` · ${x.note}` : ""}
@@ -295,7 +378,7 @@ export default async function DepensesPage({ searchParams }: { searchParams: Pro
                 </table>
               </div>
             ) : filtering && monthExpenses.length ? (
-              <NoResults q={q} href={clearHref("/depenses", sp, ["q", "etab", "mode", "cat"])} what="dépense" />
+              <NoResults q={q} href={clearHref("/depenses", sp, ["q", "etab", "mode", "cat", "fournisseur"])} what="dépense" />
             ) : (
               <Empty
                 icon={<Wallet />}
@@ -355,9 +438,10 @@ export default async function DepensesPage({ searchParams }: { searchParams: Pro
                   ))}
                 </Select>
               </Field>
-              <Field label="Fournisseur">
-                <Input name="supplier" placeholder="Facultatif" />
-              </Field>
+            </div>
+            <div>
+              <span className="mb-1.5 block text-[13px] font-medium text-slate-700">Fournisseur</span>
+              <SupplierPicker options={supplierOptions} defaultId={fSup && fSup !== "aucun" ? fSup : null} />
             </div>
             <details className="group">
               <summary className="cursor-pointer list-none text-[13px] font-medium text-brand-600 hover:underline">+ Note et justificatif</summary>

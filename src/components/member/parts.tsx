@@ -15,8 +15,9 @@ import { mDate, mt, type MKey } from "./i18n";
 export type MT = (key: MKey, vars?: Record<string, string | number>) => string;
 
 /** Langue + traduction pour une page serveur */
-export async function getMt(): Promise<{ lang: Lang; t: MT }> {
-  const lang = await getLang();
+export async function getMt(): Promise<{ lang: Extract<Lang, "fr" | "ar">; t: MT }> {
+  // Espace adhérent : français ou arabe (l'anglais du CRM retombe sur le français)
+  const lang = (await getLang()) === "ar" ? "ar" : "fr";
   return { lang, t: (k, v) => mt(lang, k, v) };
 }
 

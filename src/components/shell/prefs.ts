@@ -22,6 +22,9 @@ export function writeLocal(key: string, value: unknown) {
 }
 
 /* ---------- Thème ---------- */
+/** Évènement envoyé sur window à chaque changement de thème (bouton de l'en-tête, menu du compte) */
+export const THEME_EVENT = "mu-theme";
+
 export function currentTheme(): Theme {
   const t = typeof document !== "undefined" ? document.documentElement.dataset.theme : undefined;
   return t === "dark" || t === "system" ? t : "light";
@@ -34,6 +37,7 @@ export function applyTheme(theme: Theme) {
   d.classList.toggle("dark", dark);
   d.style.colorScheme = dark ? "dark" : "light";
   document.cookie = `theme=${theme}; path=/; max-age=31536000; samesite=lax`;
+  window.dispatchEvent(new Event(THEME_EVENT));
 }
 
 /* ---------- Étapes de prise en main réalisées dans le navigateur ---------- */

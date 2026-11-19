@@ -5,9 +5,11 @@ import { Topbar } from "@/components/topbar";
 import { Toaster } from "@/components/toaster";
 import { CommandPalette } from "@/components/command-palette";
 import { PwaRegister } from "@/components/pwa/register";
+import { TabletDock } from "@/components/tablet/dock";
 import { NotificationsProvider } from "@/components/shell/bell";
 import { ShortcutsListener } from "@/components/shell/shortcuts-listener";
 import { OnboardingBanner } from "@/components/shell/onboarding";
+import { NavProgress } from "@/components/shell/nav-progress";
 import { listSavedViews } from "@/actions/preferences";
 import { getProfile, getScope } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
@@ -48,8 +50,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <ShortcutsListener />
         <Suspense>
           <Toaster />
+          <NavProgress />
         </Suspense>
         <PwaRegister />
+        <TabletDock />
         <DemoBar />
       </div>
     </NotificationsProvider>
