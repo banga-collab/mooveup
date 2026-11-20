@@ -171,7 +171,7 @@ export function Sidebar({
   return (
     <>
       {/* Bureau */}
-      <aside className="no-print sticky top-0 hidden h-dvh w-[248px] shrink-0 flex-col border-e border-line bg-white lg:flex">
+      <aside className="no-print hidden" aria-hidden>
         <div className="flex items-center gap-2 px-5 pb-3 pt-5">
           <Link href="/" className="flex items-center gap-2" aria-label={t("nav.home")}>
             <Image src="/logo.png" alt="Moov'Up" width={473} height={136} priority className="h-auto max-h-9 w-auto max-w-[118px] object-contain" />

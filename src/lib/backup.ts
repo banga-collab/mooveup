@@ -72,12 +72,19 @@ export const KNOWN_TABLES: string[] = [
   "company_invoices",
   "company_invoice_lines",
   "company_events",
+  "establishments",
+  "sale_payments",
+  "cash_moves",
+  "stock_transfers",
   "monthly_targets",
   "member_accounts",
   "member_requests",
   "saved_views",
   "notification_reads",
   "undo_log",
+  "partnerships",
+  "complaint_zones",
+  "complaints",
   // </tables>
 ];
 

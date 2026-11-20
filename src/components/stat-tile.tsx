@@ -37,7 +37,6 @@ export function SolidTile({
   label,
   value,
   sub,
-  icon,
   trendLabel,
   trendUp,
   series,
@@ -57,8 +56,8 @@ export function SolidTile({
   const body = (
     <>
       <div className="flex items-center justify-between gap-2">
-        <p className="truncate text-[13px] text-muted">{label}</p>
-        <span className="text-slate-300 transition group-hover:text-brand-500 [&_svg]:size-4">{icon}</span>
+        <p className="truncate text-[12.5px] text-muted">{label}</p>
+        {href && <ChevronRight className="size-3.5 shrink-0 text-slate-300 opacity-0 transition group-hover:opacity-100" />}
       </div>
       <div className="mt-2 flex items-end justify-between gap-2">
         <div className="min-w-0">
@@ -81,7 +80,7 @@ export function SolidTile({
       </div>
     </>
   );
-  const cls = "group block min-w-0 rounded-xl border border-line bg-white p-4 transition";
+  const cls = "group block min-w-0 rounded-lg border border-line bg-white px-4 py-3.5 transition";
   return href ? (
     <Link href={href} className={cn(cls, "hover:border-slate-300")}>
       {body}
@@ -112,14 +111,16 @@ export function StatTile(props: {
 /** Raccourci compact : une ligne cliquable avec compteur */
 export function ShortcutTile({ href, icon, label, value, hint, hot }: { href: string; icon: ReactNode; label: string; value: ReactNode; hint: string; hot?: boolean }) {
   return (
-    <Link href={href} className="group flex min-w-0 items-center gap-3 rounded-xl border border-line bg-white px-3.5 py-3 transition hover:border-slate-300">
-      <span className={cn("grid size-8 shrink-0 place-items-center rounded-lg [&_svg]:size-4", hot ? "bg-accent-50 text-accent-600" : "bg-slate-100 text-slate-500")}>{icon}</span>
+    <Link href={href} className="group flex min-w-0 items-center gap-3 bg-white px-4 py-3.5 transition-colors hover:bg-slate-50">
+      <span className={cn("shrink-0 [&_svg]:size-4", hot ? "text-ink" : "text-slate-400")}>{icon}</span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[13px] font-medium text-ink">{label}</span>
         <span className="block truncate text-xs text-muted">{hint}</span>
       </span>
-      <span className={cn("text-sm font-semibold tabular-nums", hot ? "text-accent-600" : "text-slate-400")}>{value}</span>
-      <ChevronRight className="size-4 shrink-0 text-slate-300 transition group-hover:translate-x-0.5" />
+      <span className={cn("flex items-center gap-1.5 text-[15px] font-semibold tabular-nums", hot ? "text-ink" : "text-slate-400")}>
+        {hot && <span className="size-1.5 rounded-full bg-accent-500" aria-hidden />}
+        {value}
+      </span>
     </Link>
   );
 }

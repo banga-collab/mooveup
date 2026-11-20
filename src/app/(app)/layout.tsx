@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { Sidebar } from "@/components/sidebar";
 import { DemoBar } from "@/components/demo-bar";
-import { Topbar } from "@/components/topbar";
+import { TopNav } from "@/components/top-nav";
 import { Toaster } from "@/components/toaster";
 import { CommandPalette } from "@/components/command-palette";
 import { PwaRegister } from "@/components/pwa/register";
@@ -29,7 +29,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <NotificationsProvider>
-      <div className="lg:flex">
+      <div>
+        <TopNav
+          name={profile.full_name || profile.email}
+          role={profile.role}
+          job={profile.job_title}
+          badges={{ "/taches": due ?? 0, "/prospects": followUps ?? 0 }}
+          current={scope.current}
+          allowed={scope.allowed}
+          views={views}
+        />
         <Sidebar
           name={profile.full_name || profile.email}
           role={profile.role}
@@ -39,9 +48,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           allowed={scope.allowed}
           views={views}
         />
-        <main className="min-w-0 flex-1 px-4 pb-28 pt-5 sm:px-6 lg:px-8 lg:pb-12 lg:pt-5">
-          <div className="mx-auto max-w-[1200px]">
-            <Topbar />
+        <main className="min-w-0 px-4 pb-28 pt-5 sm:px-6 lg:px-8 lg:pb-14 lg:pt-8">
+          <div className="mx-auto max-w-[1216px]">
             <OnboardingBanner />
             {children}
           </div>

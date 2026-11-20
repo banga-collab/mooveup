@@ -7,8 +7,8 @@
 --  avec cette commande puis ré-exécute-le (il est idempotent : on peut le
 --  relancer sans perdre de données).
 --
---  Ordre : schema.sql, finance.sql, loyalty.sql, access.sql, care.sql, ops.sql, agenda.sql, corporate.sql, exec.sql, member.sql, shell.sql, undo.sql
---  Généré le 2026-11-17
+--  Ordre : schema.sql, finance.sql, loyalty.sql, access.sql, care.sql, ops.sql, agenda.sql, corporate.sql, establishments.sql, exec.sql, member.sql, shell.sql, undo.sql, v4-business.sql
+--  Généré le 2026-11-19
 -- =====================================================================
 
 -- #####################################################################
@@ -1270,6 +1270,116 @@ create policy "company events insert" on public.company_events for insert with c
 
 
 -- #####################################################################
+-- ##  establishments.sql
+-- #####################################################################
+
+-- Moov'Up CRM — établissements, caisse (paiements mixtes, entrées/sorties), stock multi-établissements
+-- À exécuter après schema.sql, finance.sql et ops.sql (utilise my_role(), is_direction(), can_see_entity()).
+
+-- ---------- Établissements ----------
+create table if not exists public.establishments (
+  id text primary key check (id ~ '^[a-z0-9-]{2,32}$'),
+  name text not null,
+  short text not null,
+  kind text not null default 'sport' check (kind in ('sport', 'beaute', 'clinique')),
+  color text not null default '#64748b' check (color ~ '^#[0-9a-fA-F]{6}$'),
+  icon text not null default 'Building2',
+  tagline text not null default '',
+  activities text[] not null default '{}',
+  audience text not null default 'Mixte' check (audience in ('Mixte', 'Femmes', 'Enfants', 'Hommes')),
+  address text not null default '',
+  phone text not null default '',
+  active boolean not null default true,
+  position int not null default 0,
+  created_at timestamptz not null default now()
+);
+
+insert into public.establishments (id, name, short, kind, color, icon, tagline, activities, audience, address, phone, position) values
+  ('sports', 'Complexe Moov''Up Sports', 'Moov''Up Sports', 'sport', '#1a6d8e', 'Dumbbell', 'Musculation, fitness, piscine et football', array['Musculation','Fitness','Piscine','Football','Coaching personnel','Cours collectifs'], 'Mixte', 'Bd Mohammed V, Agadir', '05 28 84 10 10', 1),
+  ('lady', 'Lady Moov''Up', 'Lady Moov''Up', 'sport', '#d9467a', 'Flower2', 'Fitness 100 % féminin', array['Fitness','Zumba','Yoga','Pilates','Aquagym','Coaching personnel'], 'Femmes', 'Av. Hassan II, Agadir', '05 28 84 10 20', 2),
+  ('kids', 'Moov''Up Kids', 'Moov''Up Kids', 'sport', '#e9a213', 'Smile', 'Sport et éveil pour les enfants', array['Natation enfants','Football école','Gym enfants','Arts martiaux','Stages vacances','Anniversaires'], 'Enfants', 'Bd Mohammed V, Agadir', '05 28 84 10 30', 3),
+  ('power', 'Moov''Up Power Gym', 'Power Gym', 'sport', '#c2410c', 'Zap', 'Musculation et force', array['Musculation','Powerlifting','CrossTraining','Cardio','Coaching personnel'], 'Mixte', 'Hay Dakhla, Agadir', '05 28 84 10 40', 4),
+  ('clinic', 'Anais Beauty Clinic', 'Anais Clinic', 'clinique', '#7c4dcc', 'Stethoscope', 'Médecine esthétique', array['Consultation','Injections','Laser','Peeling','Soins du visage médicaux','Amincissement'], 'Mixte', 'Av. du 29 Février, Agadir', '05 28 84 20 10', 5),
+  ('institut', 'Anais Institut', 'Anais Institut', 'beaute', '#b4774a', 'Sparkles', 'Beauté, hammam et bien-être', array['Hammam','Massage','Épilation','Soins du visage','Manucure / pédicure','Coiffure'], 'Femmes', 'Av. du 29 Février, Agadir', '05 28 84 20 20', 6),
+  ('evolve', 'Evolve Hommes', 'Evolve Hommes', 'beaute', '#334155', 'Scissors', 'Barbier et soins pour hommes', array['Coupe','Barbe','Soins du visage','Hammam','Massage'], 'Hommes', 'Founty, Agadir', '05 28 84 30 10', 7)
+on conflict (id) do nothing;
+
+alter table public.establishments enable row level security;
+drop policy if exists "establishments read" on public.establishments;
+create policy "establishments read" on public.establishments for select using (public.my_role() is not null);
+drop policy if exists "establishments direction" on public.establishments;
+create policy "establishments direction" on public.establishments for all using (public.is_direction()) with check (public.is_direction());
+
+-- ---------- Catalogue : code-barres (scan en caisse) ----------
+alter table public.catalog_items add column if not exists barcode text;
+create index if not exists catalog_items_barcode on public.catalog_items (barcode) where barcode is not null;
+
+-- ---------- Caisse : détail des paiements (paiement mixte) ----------
+create table if not exists public.sale_payments (
+  id uuid primary key default gen_random_uuid(),
+  sale_id uuid not null references public.sales(id) on delete cascade,
+  entity_id text not null,
+  method text not null check (method in ('especes', 'carte', 'virement', 'cheque', 'en_ligne')),
+  amount_mad numeric(12,2) not null check (amount_mad >= 0),
+  -- Espèces : montant remis par le client (avant rendu de monnaie)
+  tendered_mad numeric(12,2),
+  created_at timestamptz not null default now()
+);
+create index if not exists sale_payments_sale on public.sale_payments (sale_id);
+
+-- ---------- Caisse : entrées / sorties d'espèces (dépôt, retrait avec motif) ----------
+create table if not exists public.cash_moves (
+  id uuid primary key default gen_random_uuid(),
+  entity_id text not null,
+  session_id uuid references public.cash_sessions(id) on delete set null,
+  day date not null,
+  kind text not null check (kind in ('depot', 'retrait')),
+  amount_mad numeric(12,2) not null check (amount_mad > 0),
+  reason text not null default '',
+  created_by uuid references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+create index if not exists cash_moves_entity_day on public.cash_moves (entity_id, day desc);
+
+-- ---------- Stock : transferts entre établissements ----------
+create table if not exists public.stock_transfers (
+  id uuid primary key default gen_random_uuid(),
+  number text not null unique,
+  from_entity_id text not null,
+  to_entity_id text not null,
+  -- [{ label, qty, from_item_id, to_item_id, unit_cost_mad }]
+  lines jsonb not null default '[]',
+  note text,
+  created_by uuid references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  check (from_entity_id <> to_entity_id)
+);
+create index if not exists stock_transfers_created on public.stock_transfers (created_at desc);
+
+-- ---------- Sécurité ----------
+alter table public.sale_payments enable row level security;
+alter table public.cash_moves enable row level security;
+alter table public.stock_transfers enable row level security;
+
+drop policy if exists "sale_payments access" on public.sale_payments;
+create policy "sale_payments access" on public.sale_payments for all
+  using (public.can_see_entity(entity_id)) with check (public.can_see_entity(entity_id));
+
+drop policy if exists "cash_moves access" on public.cash_moves;
+create policy "cash_moves access" on public.cash_moves for all
+  using (public.can_see_entity(entity_id) and public.my_role() in ('direction', 'manager', 'reception'))
+  with check (public.can_see_entity(entity_id) and public.my_role() in ('direction', 'manager', 'reception'));
+
+-- Transferts : visibles si l'un des deux établissements est visible ; créés si les deux le sont
+drop policy if exists "stock_transfers read" on public.stock_transfers;
+create policy "stock_transfers read" on public.stock_transfers for select
+  using (public.can_see_entity(from_entity_id) or public.can_see_entity(to_entity_id));
+drop policy if exists "stock_transfers write" on public.stock_transfers;
+create policy "stock_transfers write" on public.stock_transfers for insert
+  with check (public.can_see_entity(from_entity_id) and public.can_see_entity(to_entity_id) and public.my_role() <> 'staff');
+
+
+-- #####################################################################
 -- ##  exec.sql
 -- #####################################################################
 
@@ -1558,6 +1668,120 @@ drop policy if exists "undo_log own" on public.undo_log;
 create policy "undo_log own" on public.undo_log for all
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
+
+
+-- #####################################################################
+-- ##  v4-business.sql
+-- #####################################################################
+
+-- Moov'Up CRM · V4 : fournisseurs, dépenses assignées, collaborations, réclamations par QR code.
+-- À exécuter après schema.sql, finance.sql et ops.sql (utilise my_role(), can_see_entity(), can_see_any()).
+
+-- ---------- Fournisseurs : on étend la table du module stock ----------
+alter table public.suppliers add column if not exists legal_name text;
+alter table public.suppliers add column if not exists ice text;
+alter table public.suppliers add column if not exists whatsapp text;
+alter table public.suppliers add column if not exists address text;
+alter table public.suppliers add column if not exists categories text[] not null default '{}';
+alter table public.suppliers add column if not exists payment_terms text;
+alter table public.suppliers add column if not exists rib text;
+alter table public.suppliers add column if not exists documents jsonb not null default '[]';
+alter table public.suppliers add column if not exists active boolean not null default true;
+create index if not exists suppliers_name_idx on public.suppliers (lower(name));
+
+-- ---------- Dépenses : rattachement à une fiche fournisseur ----------
+alter table public.expenses add column if not exists supplier_id uuid references public.suppliers(id) on delete set null;
+create index if not exists expenses_supplier_idx on public.expenses (supplier_id, date desc);
+
+-- ---------- Collaborations / partenariats ----------
+create table if not exists public.partnerships (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  partner_name text not null,
+  partner_kind text not null default 'marque' check (partner_kind in ('marque','influenceur','entreprise','association','media','sportif','autre')),
+  nature text not null default 'sponsoring' check (nature in ('sponsoring','echange','influence','evenement','cobranding','mecenat','autre')),
+  status text not null default 'discussion' check (status in ('discussion','active','terminee')),
+  start_date date,
+  end_date date,
+  entity_ids text[] not null default '{}',
+  our_part text,
+  their_part text,
+  value_mad numeric,
+  contact_name text,
+  contact_phone text,
+  contact_email text,
+  social text,
+  photos jsonb not null default '[]',
+  results text,
+  notes text,
+  reminder_date date,
+  reminder_task_id uuid references public.tasks(id) on delete set null,
+  created_by uuid references public.profiles on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz
+);
+create index if not exists partnerships_status_idx on public.partnerships (status, end_date);
+
+alter table public.partnerships enable row level security;
+drop policy if exists "partnerships read" on public.partnerships;
+create policy "partnerships read" on public.partnerships for select
+  using (public.my_role() is not null and (cardinality(entity_ids) = 0 or public.can_see_any(entity_ids)));
+drop policy if exists "partnerships write" on public.partnerships;
+create policy "partnerships write" on public.partnerships for all
+  using (public.my_role() in ('direction','manager') and (cardinality(entity_ids) = 0 or public.can_see_any(entity_ids)))
+  with check (public.my_role() in ('direction','manager') and (cardinality(entity_ids) = 0 or public.can_see_any(entity_ids)));
+
+-- ---------- Réclamations par QR code ----------
+create table if not exists public.complaint_zones (
+  id uuid primary key default gen_random_uuid(),
+  entity_id text not null,
+  label text not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.complaints (
+  id uuid primary key default gen_random_uuid(),
+  ref text not null unique,
+  entity_id text not null,
+  zone_id uuid references public.complaint_zones(id) on delete set null,
+  zone_label text,
+  type text not null check (type in ('panne','proprete','securite','service','autre')),
+  description text not null,
+  photo_url text,
+  contact_name text,
+  contact_phone text,
+  status text not null default 'nouvelle' check (status in ('nouvelle','en_cours','resolue')),
+  priority text not null default 'normale' check (priority in ('basse','normale','haute')),
+  assigned_to uuid references public.profiles on delete set null,
+  task_id uuid references public.tasks(id) on delete set null,
+  source text not null default 'qr' check (source in ('qr','interne')),
+  resolution text,
+  taken_at timestamptz,
+  resolved_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists complaints_entity_idx on public.complaints (entity_id, status, created_at desc);
+
+alter table public.complaint_zones enable row level security;
+alter table public.complaints enable row level security;
+
+drop policy if exists "complaint_zones read" on public.complaint_zones;
+create policy "complaint_zones read" on public.complaint_zones for select using (public.can_see_entity(entity_id));
+drop policy if exists "complaint_zones write" on public.complaint_zones;
+create policy "complaint_zones write" on public.complaint_zones for all
+  using (public.my_role() in ('direction','manager') and public.can_see_entity(entity_id))
+  with check (public.my_role() in ('direction','manager') and public.can_see_entity(entity_id));
+
+-- Les dépôts publics (page /signaler) passent par la clé service côté serveur.
+drop policy if exists "complaints read" on public.complaints;
+create policy "complaints read" on public.complaints for select using (public.can_see_entity(entity_id));
+drop policy if exists "complaints write" on public.complaints;
+create policy "complaints write" on public.complaints for all
+  using (public.my_role() is not null and public.can_see_entity(entity_id))
+  with check (public.my_role() is not null and public.can_see_entity(entity_id));
+
+-- Photos : bucket « business » (fournisseurs, collaborations, réclamations)
+insert into storage.buckets (id, name, public) values ('business', 'business', true) on conflict (id) do nothing;
 
 
 -- ---------- Compléments de mise en ligne ----------

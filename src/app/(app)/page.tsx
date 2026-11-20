@@ -177,7 +177,7 @@ export default async function Dashboard() {
         <h2 id="todo-title" className="mb-2.5 text-sm font-semibold text-ink">
           À faire maintenant
         </h2>
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0">
+        <div className="grid gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-2 xl:grid-cols-4 [&>*]:min-w-0">
           <ShortcutTile href="/taches" icon={<ListChecks />} label="Tâches dues" hint="En retard ou pour aujourd'hui" value={tasksDue ?? 0} hot={!!tasksDue} />
           <ShortcutTile
             href={toConfirm.length && !toConfirmToday ? `/agenda?date=${tomorrow}` : "/agenda"}

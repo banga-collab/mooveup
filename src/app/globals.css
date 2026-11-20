@@ -218,3 +218,6 @@ mark.hl { background: transparent; color: inherit; font-weight: 600; text-decora
   60% { transform: rotate(14deg); }
   80% { transform: rotate(-4deg); }
 }
+
+/* Icônes fines et sobres partout (Lucide) */
+svg.lucide { stroke-width: 1.6; }

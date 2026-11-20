@@ -20,7 +20,7 @@ const variants: Record<Variant, string> = {
   danger: "bg-white text-red-600 border border-line hover:border-red-200 hover:bg-red-50",
 };
 const btnBase =
-  "inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 h-9 text-[13px] font-medium transition-colors duration-150 active:scale-[.98] disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:ring-offset-1 whitespace-nowrap [&_svg]:size-4 [&_svg]:shrink-0";
+  "inline-flex items-center justify-center gap-1.5 rounded-md px-3.5 h-9 text-[13px] font-medium transition-colors duration-150 active:scale-[.98] disabled:opacity-50 disabled:pointer-events-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:ring-offset-1 whitespace-nowrap [&_svg]:size-4 [&_svg]:shrink-0";
 
 export function buttonClass(variant: Variant = "primary", className?: string) {
   return cn(btnBase, variants[variant], className);
@@ -36,7 +36,7 @@ export function LinkButton({ variant = "primary", className, ...props }: Compone
 
 /* ---------- Cartes ---------- */
 export function Card({ className, ...props }: ComponentProps<"div">) {
-  return <div className={cn("rounded-xl border border-line bg-white print-break", className)} {...props} />;
+  return <div className={cn("rounded-lg border border-line bg-white print-break", className)} {...props} />;
 }
 
 export function CardHeader({ title, subtitle, action, icon }: { title: ReactNode; subtitle?: ReactNode; action?: ReactNode; icon?: ReactNode }) {
@@ -73,12 +73,12 @@ export function PageHeader({ title, subtitle, actions, back }: { title: ReactNod
 /* ---------- Badges ---------- */
 type Tone = "brand" | "accent" | "green" | "amber" | "red" | "gray";
 const tones: Record<Tone, string> = {
-  brand: "bg-brand-50 text-brand-700",
-  accent: "bg-accent-50 text-accent-700",
-  green: "bg-emerald-50 text-emerald-700",
-  amber: "bg-amber-50 text-amber-700",
-  red: "bg-red-50 text-red-700",
-  gray: "bg-slate-100 text-slate-600",
+  brand: "border border-line text-slate-700",
+  accent: "border border-line text-slate-700",
+  green: "border border-line text-slate-700",
+  amber: "border border-line text-slate-700",
+  red: "border border-red-200 text-red-700",
+  gray: "border border-line text-slate-500",
 };
 const dots: Record<Tone, string> = {
   brand: "bg-brand-500",
@@ -91,14 +91,14 @@ const dots: Record<Tone, string> = {
 export function Badge({ tone = "brand", children, dot }: { tone?: Tone; children: ReactNode; dot?: boolean }) {
   return (
     <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[11.5px] font-medium", tones[tone])}>
-      {dot && <span className={cn("size-1.5 rounded-full", dots[tone])} />}
+      {(dot || tone !== "gray") && <span className={cn("size-1.5 rounded-full", dots[tone])} />}
       {children}
     </span>
   );
 }
 
 /* ---------- Avatar ---------- */
-const avatarColors = ["bg-brand-100 text-brand-700", "bg-accent-100 text-accent-700", "bg-slate-200 text-slate-700", "bg-teal-100 text-teal-700", "bg-violet-100 text-violet-700", "bg-sky-100 text-sky-700"];
+const avatarColors = ["bg-slate-100 text-slate-600"];
 export function Avatar({ name, size = 40, className }: { name: string; size?: number; className?: string }) {
   const idx = [...name].reduce((a, c) => a + c.charCodeAt(0), 0) % avatarColors.length;
   return (
